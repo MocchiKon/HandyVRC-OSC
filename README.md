@@ -15,7 +15,8 @@ Mirror: https://gitlab.com/voh/HandyVRC-OSC
 ## Setup
 Before using this app you need to fill few values in app.properties file
 (If you don't have it then just run app and it will create one if it's missing).
-Every property is explained in the properties file.
+Every property is explained in the properties file.<br/>
+Then run the app by double-clicking "start.bat" file. GUI only displays current penetration amount, all other information is printed to the console and log files.
 
 <b>IMPORTANT INFORMATION:</b>
 1. It's highly recommended to run this app on the remote user side as this will allow for perfect synchronization
