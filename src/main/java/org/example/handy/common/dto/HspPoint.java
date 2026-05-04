@@ -1,4 +1,4 @@
-package org.example.handy.v3.dto;
+package org.example.handy.common.dto;
 
 public record HspPoint(int t, int x) {
 }

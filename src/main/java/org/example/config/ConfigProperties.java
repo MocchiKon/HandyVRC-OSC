@@ -1,4 +1,4 @@
-package org.example;
+package org.example.config;
 
 import lombok.Builder;
 import org.example.processor.ParameterProcessorType;
@@ -10,6 +10,8 @@ public record ConfigProperties(
         String avatarParameter,
         String handyApplicationId,
         ParameterProcessorType processingAlgorithm,
+        ConnectionMode connectionMode,
+        boolean testMode,
         int handyApiVersion,
         int listenOnPort,
         boolean waitForApiResponse,

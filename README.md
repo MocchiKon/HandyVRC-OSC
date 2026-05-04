@@ -39,4 +39,4 @@ Hopefully I will have time and will to implement these one day (probably not as 
 - [ ] Penetration multiplier (for better blowjobs in PENETRATOR mode)
 - [ ] Penetrator length auto-detection
 - [ ] Default delay calculation
-- [ ] Maybe some improvements like: Bluetooth, improving edge case handling in penetration calculation logic
+- [x] Bluetooth

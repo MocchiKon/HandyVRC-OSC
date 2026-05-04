@@ -1,4 +1,4 @@
-package org.example.handy.v3.dto;
+package org.example.handy.common.dto;
 
 import java.util.List;
 
