@@ -2,14 +2,12 @@ package org.example.processor;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.example.ConfigProperties;
+import org.example.config.ConfigProperties;
 import org.example.handy.common.HandyBaseResponseWithError;
-import org.example.handy.v3.HandyClientV3;
+import org.example.handy.common.HandyClient;
+import org.example.handy.common.dto.*;
 import org.example.handy.v3.HandyModeV3;
-import org.example.handy.v3.dto.*;
 
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -17,13 +15,15 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static org.example.Main.delayedClosingWithLog;
+
 @Slf4j
 public class HspParameterProcessor implements ParameterProcessor
 {
     public static final int HSP_POINTS_PER_MSG_LIMIT = 100;
     private final long INIT_TIME_MS;
     private final List<HspPoint> hspPoints = Collections.synchronizedList(new ArrayList<>(20));
-    private final HandyClientV3 handyClient;
+    private final HandyClient handyClient;
 
     private int lastPosition = 100;
 
@@ -32,32 +32,29 @@ public class HspParameterProcessor implements ParameterProcessor
     private int minimalValueChange;
     private float penetratorLength;
     private SpsType spsType;
-    private boolean waitForApiResponse;
 
     private Consumer<Integer> onValueChange;
 
-    public HspParameterProcessor(HandyClientV3 handyClient, ConfigProperties config)
+    public HspParameterProcessor(HandyClient handyClient, ConfigProperties config)
     {
         this.handyClient = handyClient;
         setupProperties(config);
         HandyBaseResponseWithError response = this.handyClient.changeMode(HandyModeV3.HSP);
         if (response.error() != null)
         {
-            log.error("Could not change Handy mode to HSP (reason: {}). Closing app...", response.error().message());
-            System.exit(1); // TODO For every exit(1) add Error Dialog (static method in main)
+            delayedClosingWithLog("Could not change Handy mode to HSP (reason: %s). Closing app...".formatted(response.error().message()));
         }
         HandySetupResponse setupResponse = this.handyClient.hspSetup();
         if (setupResponse.error() != null)
         {
-            log.error("Could not setup HSP stream (reason: {}). Closing app...", setupResponse.error().message());
-            System.exit(1);
+            delayedClosingWithLog("Could not setup HSP stream (reason: %s). Closing app...".formatted(setupResponse.error().message()));
         }
+        syncClock();
         this.INIT_TIME_MS = System.currentTimeMillis();
         HandyBaseResponseWithError playResponse = this.handyClient.hspPlay(0, 0, false);
         if (playResponse.error() != null)
         {
-            log.error("Could not play HSP stream (reason: {}). Closing app...", playResponse.error().message());
-            System.exit(1);
+            delayedClosingWithLog("Could not play HSP stream (reason: %s). Closing app...".formatted(playResponse.error().message()));
         }
         this.handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
         Optional<SliderSettingsResult> sliderSettings = this.handyClient.getSliderSettings();
@@ -70,6 +67,12 @@ public class HspParameterProcessor implements ParameterProcessor
         this.onValueChange = onValueChange;
     }
 
+    @Override
+    public long syncClock()
+    {
+        return handyClient.syncClock();
+    }
+
     private void setupProperties(ConfigProperties config)
     {
         synchronized (hspPoints)
@@ -79,7 +82,6 @@ public class HspParameterProcessor implements ParameterProcessor
             this.minimalValueChange = config.minimalValueChange();
             this.spsType = config.spsType();
             this.penetratorLength = config.penetratorLength();
-            this.waitForApiResponse = config.waitForApiResponse();
         }
     }
 
@@ -88,7 +90,8 @@ public class HspParameterProcessor implements ParameterProcessor
     {
         synchronized (hspPoints)
         {
-            int position = (int) ((1.f - calculatePenetration(value)) * 100); // 100 = top, 0 = bottom
+            float floatPosition = 1.f - calculatePenetration(value);
+            int position = (int) (floatPosition * 100); // 100 = top, 0 = bottom (Handy API)
             int positionChange = Math.abs(position - lastPosition);
             if (minimalValueChange > positionChange)
             {
@@ -97,10 +100,15 @@ public class HspParameterProcessor implements ParameterProcessor
             lastPosition = position;
             int t = (int) (System.currentTimeMillis() - INIT_TIME_MS + timeOffsetMs);
             hspPoints.add(new HspPoint(t, position));
-            onValueChange.accept(100 - position); // 0 = top, 100 = bottom
+            onValueChange.accept(100 - position); // Penetration amount, 100 means fully inserted
         }
     }
 
+    /**
+     * @param value Value in 0-1 range (for penetrator, 1 = fully inserted and 0 = fully out).
+     * @return Penetration amount in 0-1 range (1 = fully inserted).
+     * For penetrator, it returns the value as is. For orifice, it calculates penetration based on exposed length and penetrator length.
+     */
     private Float calculatePenetration(Float value)
     {
         if (spsType == SpsType.PENETRATOR)
@@ -174,19 +182,7 @@ public class HspParameterProcessor implements ParameterProcessor
         }
         List<HspPoint> hspPointsCopy = getAndClearHspPoints();
         lastMessageSentMs = System.currentTimeMillis();
-        Thread requestThread = Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy));
-        if (waitForApiResponse) // TODO Remove?
-        {
-            long start = System.currentTimeMillis();
-            boolean hasCompleted = requestThread.join(Duration.of(330, ChronoUnit.MILLIS)); // TODO New param in config or take pointsOffset OR pointsOffset - delay to prevent points skipping
-            // TODO Calculate delay dynamically if not set in config? (new property)
-            long end = System.currentTimeMillis();
-            log.trace("Joining took {} ms", end - start); // TODO Delete this
-            if (!hasCompleted)
-            {
-                log.warn("Skipping waiting fo");
-            }
-        }
+        Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy));
         return lastMessageSentMs;
     }
 

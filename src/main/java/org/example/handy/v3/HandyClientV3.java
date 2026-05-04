@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
-import org.example.handy.v3.dto.*;
+import org.example.handy.common.dto.*;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -57,6 +57,7 @@ public class HandyClientV3 implements HandyClient
     }
 
     @SneakyThrows
+    @Override
     public HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving)
     {
         String body = "{\"start_time\":%s,\"server_time\":%s,\"playback_rate\":1,\"pause_on_starving\":%s,\"loop\":false}".formatted(startTime, serverTime, pauseOnStarving);
@@ -75,6 +76,7 @@ public class HandyClientV3 implements HandyClient
     }
 
     @SneakyThrows
+    @Override
     public HandyHspAddResponse hspAdd(HspAddRequest requestBody)
     {
         String body = objectMapper.writeValueAsString(requestBody);
@@ -107,6 +109,7 @@ public class HandyClientV3 implements HandyClient
     }
 
     @SneakyThrows
+    @Override
     public HandySetupResponse hspSetup()
     {
         var request = HttpRequest.newBuilder()
@@ -119,6 +122,7 @@ public class HandyClientV3 implements HandyClient
                 .build();
         log.info("Initializing HSP stream with id 1");
         var httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        // NOTE: current_time - ms since device boot
         log.info("Initialized HSP stream with id 1 ({})", httpResponse.body());
         return objectMapper.readValue(httpResponse.body(), HandySetupResponse.class);
     }
@@ -145,6 +149,7 @@ public class HandyClientV3 implements HandyClient
     }
 
     @SneakyThrows
+    @Override
     public Optional<SliderSettingsResult> getSliderSettings()
     {
         var request = HttpRequest.newBuilder()
@@ -165,6 +170,7 @@ public class HandyClientV3 implements HandyClient
     }
 
     @SneakyThrows
+    @Override
     public void setSliderSettings(Float min, Float max)
     {
         String body;
@@ -197,10 +203,49 @@ public class HandyClientV3 implements HandyClient
         httpClient.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
+    @SneakyThrows
+    public long getServerTime()
+    {
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URI + "servertime"))
+                .header("accept", "application/json")
+                .GET()
+                .build();
+        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        var node = objectMapper.readTree(httpResponse.body());
+        return node.get("server_time").asLong();
+    }
+
+    @Override
+    public long syncClock()
+    {
+        final int SYNC_SAMPLES = 30;
+        double offsetSum = 0;
+        double rtdSum = 0;
+
+        for (int i = 0; i < SYNC_SAMPLES; i++)
+        {
+            long tSend = System.currentTimeMillis();
+            long serverTime = getServerTime();
+            long tReceive = System.currentTimeMillis();
+
+            long rtd = tReceive - tSend;
+            long serverTimeEstimate = serverTime + rtd / 2;
+            long offset = serverTimeEstimate - tReceive;
+            rtdSum += rtd;
+            offsetSum += offset;
+        }
+
+        long estimatedOffset = Math.round(offsetSum / SYNC_SAMPLES);
+        long avgRtd = Math.round(rtdSum / SYNC_SAMPLES);
+        log.info("API clock sync complete: estimatedOffset={}ms, avgRtd={}ms (from {} samples)", estimatedOffset, avgRtd, SYNC_SAMPLES);
+        return estimatedOffset;
+    }
+
     private boolean attemptRefreshingHttpClient() // Prevent GOAWAY (every 94 requests on my machine)
     {
         int count = requestCount.incrementAndGet();
-        if (count >= 80)// TODO Param config?
+        if (count >= 80)
         {
             requestCount.set(0);
             httpClient = HttpClient.newHttpClient();

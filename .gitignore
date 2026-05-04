@@ -5,6 +5,8 @@ target/
 dependency-reduced-pom.xml
 
 logs/*
+example/*
+libsource/*
 TODO.md
 
 ### IntelliJ IDEA ###

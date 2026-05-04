@@ -1,10 +1,11 @@
-package org.example;
+package org.example.config;
 
 import ch.qos.logback.classic.Level;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.example.Main;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
@@ -13,20 +14,16 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.function.Consumer;
-import java.util.function.Function;
+
+import static org.example.Main.delayedClosingWithLog;
 
 @Slf4j
 public class ConfigLoader
 {
-    private static final int RELOAD_EVERY_MS = 10_000;
     private final Path appConfigPath;
-    private FileTime lastModifiedTime;
 
     @SneakyThrows
     public ConfigLoader(Path appConfigPath)
@@ -42,15 +39,13 @@ public class ConfigLoader
             {
                 if (defaultFile == null)
                 {
-                    log.error("Missing config file!");
-                    System.exit(1);
+                    delayedClosingWithLog("Missing config file!");
                 }
                 Files.write(appConfigPath, defaultFile.readAllBytes());
             }
             catch (Exception e)
             {
-                log.error("Failed initializing config!", e);
-                System.exit(1);
+                delayedClosingWithLog("Failed initializing config!", e);
             }
         }
         return readConfigPropertiesAndSetLoggingLevel();
@@ -76,22 +71,32 @@ public class ConfigLoader
         var processingAlgorithm = EnumUtils.getEnum(ParameterProcessorType.class, processingAlgorithmProperty);
         if (processingAlgorithm == null)
         {
-            log.error("No '{}' algorithm available! Check your config file, closing app...", processingAlgorithmProperty);
-            System.exit(1);
+            delayedClosingWithLog("No '%s' algorithm available! Check your config file, closing app...".formatted(processingAlgorithmProperty));
         }
         var spsType = EnumUtils.getEnum(SpsType.class, getPropertyOrCloseAppWhenBlank(properties, "spsType").toUpperCase());
         if (spsType == null)
         {
-            log.error("No '{}' spsType available! Check your config file, closing app...", spsType);
-            System.exit(1);
+            delayedClosingWithLog("No '%s' spsType available! Check your config file, closing app...".formatted(spsType));
         }
         // TODO Log loaded config (without keys)
+        var connectionModeStr = getPropertyOrDefault(properties, "connectionMode", "API").toUpperCase();
+        var connectionMode = EnumUtils.getEnum(ConnectionMode.class, connectionModeStr);
+        if (connectionMode == null)
+        {
+            log.warn("Unknown connectionMode '{}', defaulting to API", connectionModeStr);
+            connectionMode = ConnectionMode.API;
+        }
+        boolean testMode = Boolean.parseBoolean(getPropertyOrDefault(properties, "testMode", "false"));
+
+        boolean isApiMode = connectionMode == ConnectionMode.API;
         return ConfigProperties.builder()
+                .connectionMode(connectionMode)
+                .testMode(testMode)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
-                .handyApplicationId(getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId"))
+                .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
                 .processingAlgorithm(processingAlgorithm)
                 .avatarParameter(getProperty(properties, "avatarParameter").orElseGet(() -> pickDefaultAvatarParameter(spsType)))
-                .deviceConnectionKey(getPropertyOrCloseAppWhenBlank(properties, "deviceConnectionKey"))
+                .deviceConnectionKey(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "deviceConnectionKey") : null)
                 .waitForApiResponse(Boolean.parseBoolean(getPropertyOrDefault(properties, "waitForApiResponse", "false")))
                 .pointsOffset(Integer.parseInt(getPropertyOrCloseAppWhenBlank(properties, "pointsOffset")))
                 .sendMessageEveryMs(Integer.parseInt(getPropertyOrCloseAppWhenBlank(properties, "sendMessageEveryMs")))
@@ -107,7 +112,7 @@ public class ConfigLoader
     {
         if (spsType == null)
         {
-            log.error("Missing spsType, cannot pick default avatar parameter", spsType);
+            log.error("Missing spsType, cannot pick default avatar parameter");
         }
         return switch (spsType)
         {
@@ -136,62 +141,8 @@ public class ConfigLoader
         String value = properties.getProperty(propertyName);
         if (StringUtils.isBlank(value))
         {
-            log.error("Missing '{}' property in config file! Closing app...", propertyName);
-            JOptionPane.showMessageDialog(null, "Missing '%s' property in config file!".formatted(propertyName), "Error", JOptionPane.ERROR_MESSAGE);
-            System.exit(1);
+            delayedClosingWithLog("Missing '%s' property in config file! Closing app...".formatted(propertyName));
         }
         return value;
-    }
-
-    @SneakyThrows
-    public void runReloading(Consumer<ConfigProperties> propertiesConsumer)
-    {
-        lastModifiedTime = Files.getLastModifiedTime(appConfigPath, LinkOption.NOFOLLOW_LINKS);
-        new Thread(() -> tryReloadingConfig(propertiesConsumer)).start();
-    }
-
-    private void tryReloadingConfig(Consumer<ConfigProperties> propertiesConsumer)
-    {
-        try
-        {
-            while (true)
-            {
-                tryReloadingConfig().ifPresent(propertiesConsumer);
-                delayUntilNextReload();
-            }
-        }
-        catch (Exception e)
-        {
-            log.error("Caught exception during config reload!", e);
-        }
-    }
-
-    @SneakyThrows
-    private Optional<ConfigProperties> tryReloadingConfig()
-    {
-        if (Files.notExists(appConfigPath))
-        {
-            return Optional.empty();
-        }
-        FileTime modifiedTime = Files.getLastModifiedTime(appConfigPath, LinkOption.NOFOLLOW_LINKS);
-        if (modifiedTime.equals(lastModifiedTime))
-        {
-            return Optional.empty();
-        }
-        log.info("Reloading configuration...");
-        lastModifiedTime = modifiedTime;
-        return Optional.of(readConfigPropertiesAndSetLoggingLevel());
-    }
-
-    private void delayUntilNextReload()
-    {
-        try
-        {
-            Thread.sleep(RELOAD_EVERY_MS);
-        }
-        catch (InterruptedException e)
-        {
-            log.error("Error while sleeping: {}", e.getMessage());
-        }
     }
 }
