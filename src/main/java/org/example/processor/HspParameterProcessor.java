@@ -8,10 +8,11 @@ import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.*;
 import org.example.handy.v3.HandyModeV3;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -35,6 +36,24 @@ public class HspParameterProcessor implements ParameterProcessor
 
     private Consumer<Integer> onValueChange;
 
+    // Recording points
+    private boolean savePointsToFile;
+    private Integer firstRecordedPointTime;
+    private final static String HSP_POINTS_FILE_NAME = "handy_points-%s.csv".formatted(UUID.randomUUID());
+
+    // clamp points
+    private boolean clamp;
+    private Integer lastX = null;
+    private int lastDir = 0;
+
+    // Tests only
+    HspParameterProcessor(ConfigProperties config)
+    {
+        this.INIT_TIME_MS = System.currentTimeMillis();
+        this.handyClient = null;
+        setupProperties(config);
+    }
+
     public HspParameterProcessor(HandyClient handyClient, ConfigProperties config)
     {
         this.handyClient = handyClient;
@@ -49,7 +68,7 @@ public class HspParameterProcessor implements ParameterProcessor
         {
             delayedClosingWithLog("Could not setup HSP stream (reason: %s). Closing app...".formatted(setupResponse.error().message()));
         }
-        syncClock();
+//        syncClock(); TODO
         this.INIT_TIME_MS = System.currentTimeMillis();
         HandyBaseResponseWithError playResponse = this.handyClient.hspPlay(0, 0, false);
         if (playResponse.error() != null)
@@ -59,6 +78,20 @@ public class HspParameterProcessor implements ParameterProcessor
         this.handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
         Optional<SliderSettingsResult> sliderSettings = this.handyClient.getSliderSettings();
         sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
+    }
+
+    private void setupProperties(ConfigProperties config)
+    {
+        synchronized (hspPoints)
+        {
+            this.timeOffsetMs = config.pointsOffset();
+            this.timeBetweenMessages = config.sendMessageEveryMs();
+            this.minimalValueChange = config.minimalValueChange();
+            this.spsType = config.spsType();
+            this.penetratorLength = config.penetratorLength();
+            this.savePointsToFile = config.savePointsToFile();
+            this.clamp = config.clamp();
+        }
     }
 
     @Override
@@ -71,18 +104,6 @@ public class HspParameterProcessor implements ParameterProcessor
     public long syncClock()
     {
         return handyClient.syncClock();
-    }
-
-    private void setupProperties(ConfigProperties config)
-    {
-        synchronized (hspPoints)
-        {
-            this.timeOffsetMs = config.pointsOffset();
-            this.timeBetweenMessages = config.sendMessageEveryMs();
-            this.minimalValueChange = config.minimalValueChange();
-            this.spsType = config.spsType();
-            this.penetratorLength = config.penetratorLength();
-        }
     }
 
     @Override
@@ -100,7 +121,7 @@ public class HspParameterProcessor implements ParameterProcessor
             lastPosition = position;
             int t = (int) (System.currentTimeMillis() - INIT_TIME_MS + timeOffsetMs);
             hspPoints.add(new HspPoint(t, position));
-            onValueChange.accept(100 - position); // Penetration amount, 100 means fully inserted
+            onValueChange.accept(position);
         }
     }
 
@@ -119,12 +140,6 @@ public class HspParameterProcessor implements ParameterProcessor
         float exposedRatio = exposedLength / penetratorLength;
         float penetrationValue = Math.max(1.f - exposedRatio, 0.f); // Prevent negative values
         return Math.min(penetrationValue, 1.f); // Cap at 1.f
-    }
-
-    @Override
-    public void refreshConfig(ConfigProperties configProperties)
-    {
-        setupProperties(configProperties);
     }
 
     @Override
@@ -181,9 +196,29 @@ public class HspParameterProcessor implements ParameterProcessor
             return lastMessageSentMs;
         }
         List<HspPoint> hspPointsCopy = getAndClearHspPoints();
+        savePointsToFileIfRequested(hspPointsCopy);
         lastMessageSentMs = System.currentTimeMillis();
-        Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy));
+        Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy)); // TODO Use async instead of starting virtual threads?
         return lastMessageSentMs;
+    }
+
+    private void savePointsToFileIfRequested(List<HspPoint> hspPointsCopy)
+    {
+        if (!savePointsToFile) return;
+        if (firstRecordedPointTime == null) firstRecordedPointTime = hspPointsCopy.getFirst().t();
+
+        byte[] data = hspPointsCopy.stream()
+                .map(point -> "\n%s,%s".formatted(point.t() - firstRecordedPointTime, point.x()))
+                .collect(Collectors.joining())
+                .getBytes();
+        try
+        {
+            Files.write(Path.of(HSP_POINTS_FILE_NAME), data, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        }
+        catch (IOException e)
+        {
+            log.error("Failed to save points {} to file: {}", hspPointsCopy, e.getMessage());
+        }
     }
 
     private List<HspPoint> getAndClearHspPoints()
@@ -194,6 +229,12 @@ public class HspParameterProcessor implements ParameterProcessor
             hspPointsCopy = new ArrayList<>(hspPoints);
             hspPoints.clear();
         }
+
+        if (clamp)
+        {
+            hspPointsCopy = clampPoints(hspPointsCopy);
+        }
+
         if (hspPointsCopy.size() >= HSP_POINTS_PER_MSG_LIMIT)
         {
             hspPointsCopy = hspPointsCopy.stream()
@@ -206,6 +247,43 @@ public class HspParameterProcessor implements ParameterProcessor
             log.error("Some points are outdated before sending! hspPointsCopy={}, currentTime={}", hspPointsCopy, System.currentTimeMillis() - INIT_TIME_MS);
         }
         return hspPointsCopy;
+    }
+
+    // Collapse intermediate points that continue in the same direction:
+    // keep only turning points (and the last point of a monotonic run).
+    List<HspPoint> clampPoints(List<HspPoint> points)
+    {
+        points.sort(Comparator.comparing(HspPoint::t));
+        List<HspPoint> result = new ArrayList<>();
+
+        for (HspPoint p : points)
+        {
+            if (lastX == null)
+            {
+                result.add(p);
+                lastX = p.x();
+                continue;
+            }
+
+            int dir = Integer.compare(p.x() - lastX, 0);
+            if (dir == 0) continue;
+
+            boolean isTurn = (lastDir != 0 && dir != lastDir);
+
+            if (isTurn || result.isEmpty()) // turning point OR first emission in this message
+            {
+                result.add(p);
+            }
+            else // continuing same direction within this message
+            {
+                result.set(result.size() - 1, p);
+            }
+
+            lastDir = dir;
+            lastX = p.x();
+        }
+
+        return result;
     }
 
     private void sendHspMessage(List<HspPoint> hspPointsCopy)

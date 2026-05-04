@@ -12,6 +12,8 @@ public record ConfigProperties(
         ParameterProcessorType processingAlgorithm,
         ConnectionMode connectionMode,
         boolean testMode,
+        boolean savePointsToFile,
+        boolean clamp,
         int handyApiVersion,
         int listenOnPort,
         boolean waitForApiResponse,
