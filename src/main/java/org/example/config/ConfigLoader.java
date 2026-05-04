@@ -87,11 +87,15 @@ public class ConfigLoader
             connectionMode = ConnectionMode.API;
         }
         boolean testMode = Boolean.parseBoolean(getPropertyOrDefault(properties, "testMode", "false"));
+        boolean savePointsToFile = Boolean.parseBoolean(getPropertyOrDefault(properties, "savePointsToFile", "false"));
+        boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
         return ConfigProperties.builder()
                 .connectionMode(connectionMode)
                 .testMode(testMode)
+                .savePointsToFile(savePointsToFile)
+                .clamp(clamp)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
                 .processingAlgorithm(processingAlgorithm)
