@@ -37,7 +37,6 @@ public class HandyBleAdapter
                 {
                     if (isHandy(peripheral))
                     {
-//                        adapter.scanStop();
                         handy = peripheral;
                         log.info("Found Bluetooth adapter: {}", peripheral);
                     }
@@ -50,7 +49,6 @@ public class HandyBleAdapter
             {
                 Thread.sleep(100);
             }
-//            adapter.scanFor(5000);
             long end = System.currentTimeMillis();
             log.info("Finished scanning. Took {}", (end - start));
         }

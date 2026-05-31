@@ -217,29 +217,23 @@ public class HandyClientV3 implements HandyClient
     }
 
     @Override
-    public long syncClock()
+    public long calculateMessageDelay()
     {
         final int SYNC_SAMPLES = 30;
-        double offsetSum = 0;
         double rtdSum = 0;
 
         for (int i = 0; i < SYNC_SAMPLES; i++)
         {
             long tSend = System.currentTimeMillis();
-            long serverTime = getServerTime();
+            getServerTime();
             long tReceive = System.currentTimeMillis();
-
-            long rtd = tReceive - tSend;
-            long serverTimeEstimate = serverTime + rtd / 2;
-            long offset = serverTimeEstimate - tReceive;
-            rtdSum += rtd;
-            offsetSum += offset;
+            rtdSum += tReceive - tSend;
         }
 
-        long estimatedOffset = Math.round(offsetSum / SYNC_SAMPLES);
         long avgRtd = Math.round(rtdSum / SYNC_SAMPLES);
-        log.info("API clock sync complete: estimatedOffset={}ms, avgRtd={}ms (from {} samples)", estimatedOffset, avgRtd, SYNC_SAMPLES);
-        return estimatedOffset;
+        long messageDelay = avgRtd / 2; // one-way latency, independent of server/local clock skew
+        log.info("API message delay calculated: messageDelay={}ms, avgRtd={}ms (from {} samples)", messageDelay, avgRtd, SYNC_SAMPLES);
+        return messageDelay;
     }
 
     private boolean attemptRefreshingHttpClient() // Prevent GOAWAY (every 94 requests on my machine)

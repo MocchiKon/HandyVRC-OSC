@@ -17,17 +17,11 @@ public class HandyClientBle implements HandyClient
 {
     private final HandyBleAdapter ble;
     private final HandyRpcClient rpc;
-    private int estimatedOffset = 0;
 
     public HandyClientBle(HandyBleAdapter ble)
     {
         this.ble = ble;
         this.rpc = new HandyRpcClient(ble);
-    }
-
-    private long estimatedServerTime()
-    {
-        return System.currentTimeMillis() + estimatedOffset;
     }
 
     @Override
@@ -63,7 +57,7 @@ public class HandyClientBle implements HandyClient
                 log.info("BLE HSP state: {}, maxPoints={}, state={}", state.getPlayState(), state.getMaxPoints(), state);
             }
             // Return mocked response matching API format (no error = success)
-            return new HandySetupResponse(null, new HandySetupResult((int) estimatedServerTime()));
+            return new HandySetupResponse(null, new HandySetupResult(0));
         }
         catch (Exception e)
         {
@@ -82,7 +76,6 @@ public class HandyClientBle implements HandyClient
                     .setRequestHspPlay(Messages.RequestHspPlay.newBuilder()
                             .setStartTime((int) startTime)
                             .setServerTime(serverTime)
-//                            .setServerTime(estimatedServerTime())
                             .setPlaybackRate(1.0f)
                             .setLoop(false)
                             .setPauseOnStarving(pauseOnStarving)
@@ -122,10 +115,7 @@ public class HandyClientBle implements HandyClient
             log.trace("[BLE HSP] Sent {} points", points.size());
 
             // Return mocked success response — BLE fire-and-forget has no result payload
-            int currentTime = (int) (estimatedServerTime());
-            int firstT = requestBody.points().getFirst().t();
-            int lastT = requestBody.points().getLast().t();
-            return new HandyHspAddResponse(null, new HspState(currentTime, firstT-1, lastT));
+            return new HandyHspAddResponse(null, new HspState(1, 0, 2));
         }
         catch (Exception e)
         {
@@ -185,57 +175,32 @@ public class HandyClientBle implements HandyClient
     }
 
     @Override
-    public long syncClock()
+    public long calculateMessageDelay()
     {
         try
         {
-            log.info("Synchronizing BLE clock...");
+            log.info("Measuring BLE message delay...");
             final int SYNC_SAMPLES = 30;
-            double offsetSum = 0;
-            double rtdSum = 0;
+            long rtdSum = 0;
 
             for (int i = 0; i < SYNC_SAMPLES; i++)
             {
                 long tSend = System.currentTimeMillis();
-                HandyRpc.Response response = rpc.sendRequest(HandyRpc.Request.newBuilder()
+                // ClockOffsetGet is used only as a cheap round-trip ping to measure latency
+                rpc.sendRequest(HandyRpc.Request.newBuilder()
                         .setRequestClockOffsetGet(Messages.RequestClockOffsetGet.getDefaultInstance()));
                 long tReceive = System.currentTimeMillis();
-
-                if (response.hasResponseClockOffsetGet())
-                {
-                    log.info("Recieved: {}", response.getResponseClockOffsetGet());
-                    // clock_offset was 1777813502495 for BLE
-                }
-
-                long rtd = tReceive - tSend;
-                offsetSum += rtd / 2.0;
-                rtdSum += rtd;
-                Thread.sleep(100); // ???
+                rtdSum += tReceive - tSend;
             }
 
-            estimatedOffset = (int) Math.round(offsetSum / SYNC_SAMPLES);
-            int avgRtd = (int) Math.round(rtdSum / SYNC_SAMPLES);
-            log.info("BLE clock sync: avg RTD={}ms, offset={}ms", avgRtd, estimatedOffset);
-
-            HandyRpc.Response resp = rpc.sendRequest(HandyRpc.Request.newBuilder()
-                    .setRequestClockOffsetGet(Messages.RequestClockOffsetGet.getDefaultInstance()));
-
-            int deviceTime = resp.getResponseClockOffsetGet().getTime();
-            long clockOffset = estimatedServerTime() - deviceTime;
-
-            HandyRpc.Response response = rpc.sendRequest(HandyRpc.Request.newBuilder()
-                    .setRequestClockOffsetSet(Messages.RequestClockOffsetSet.newBuilder()
-                            .setClockOffset(clockOffset)
-                            .setRtd(avgRtd)
-                            .build()));
-
-            log.info("BLE clock synced (clockOffset={})", clockOffset);
-            log.info("BLE clock SET response: {}", response);
-            return estimatedOffset;
+            long avgRtd = Math.round(rtdSum / (double) SYNC_SAMPLES);
+            long messageDelay = avgRtd / 2; // one-way latency
+            log.info("BLE message delay: messageDelay={}ms, avgRtd={}ms (from {} samples)", messageDelay, avgRtd, SYNC_SAMPLES);
+            return messageDelay;
         }
         catch (Exception e)
         {
-            throw new RuntimeException("BLE clock sync failed", e);
+            throw new RuntimeException("BLE message delay measurement failed", e);
         }
     }
 }

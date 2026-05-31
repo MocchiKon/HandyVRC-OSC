@@ -52,6 +52,7 @@ public class HspParameterProcessor implements ParameterProcessor
         this.INIT_TIME_MS = System.currentTimeMillis();
         this.handyClient = null;
         setupProperties(config);
+        this.timeOffsetMs = config.pointsOffset() != null ? config.pointsOffset() : 0;
     }
 
     public HspParameterProcessor(HandyClient handyClient, ConfigProperties config)
@@ -68,7 +69,7 @@ public class HspParameterProcessor implements ParameterProcessor
         {
             delayedClosingWithLog("Could not setup HSP stream (reason: %s). Closing app...".formatted(setupResponse.error().message()));
         }
-//        syncClock(); TODO
+        this.timeOffsetMs = resolvePointsOffset(config);
         this.INIT_TIME_MS = System.currentTimeMillis();
         HandyBaseResponseWithError playResponse = this.handyClient.hspPlay(0, 0, false);
         if (playResponse.error() != null)
@@ -84,7 +85,6 @@ public class HspParameterProcessor implements ParameterProcessor
     {
         synchronized (hspPoints)
         {
-            this.timeOffsetMs = config.pointsOffset();
             this.timeBetweenMessages = config.sendMessageEveryMs();
             this.minimalValueChange = config.minimalValueChange();
             this.spsType = config.spsType();
@@ -100,10 +100,22 @@ public class HspParameterProcessor implements ParameterProcessor
         this.onValueChange = onValueChange;
     }
 
-    @Override
-    public long syncClock()
+    /**
+     * Resolves the points offset (delay applied to every point) to use.
+     * If the user set 'pointsOffset' in the config it is used as-is; otherwise it is auto-calculated
+     * from the measured message delay so that points arrive in time: sendMessageEveryMs + messageDelay.
+     */
+    private int resolvePointsOffset(ConfigProperties config)
     {
-        return handyClient.syncClock();
+        if (config.pointsOffset() != null)
+        {
+            return config.pointsOffset();
+        }
+        long messageDelay = handyClient.calculateMessageDelay();
+        int autoOffset = (int) (config.sendMessageEveryMs() + messageDelay);
+        log.info("'pointsOffset' not specified, auto-calculated to {}ms (sendMessageEveryMs={}ms + messageDelay={}ms)",
+                autoOffset, config.sendMessageEveryMs(), messageDelay);
+        return autoOffset;
     }
 
     @Override
@@ -336,6 +348,7 @@ public class HspParameterProcessor implements ParameterProcessor
 
     private long getTimeUntilNextMsg(long lastMessageSentMs)
     {
-        return timeBetweenMessages - (System.currentTimeMillis() - lastMessageSentMs);
+        long timeElapsedSinceLastMessage = System.currentTimeMillis() - lastMessageSentMs;
+        return timeBetweenMessages - timeElapsedSinceLastMessage;
     }
 }

@@ -41,7 +41,6 @@ public class Main
 
         HandyClient handyClient = initHandyClient(config);
         ParameterProcessor processor = initProcessor(handyClient, config);
-//        processor.syncClock();
         processor.setValueChangeListener(val -> penetrationValueLabel.setText(String.valueOf(val)));
 
         if (config.testMode())

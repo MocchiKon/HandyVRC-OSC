@@ -18,8 +18,8 @@ public interface HandyClient
     Optional<SliderSettingsResult> getSliderSettings();
 
     /**
-     * Synchronizes the clock with the device/server.
-     * Returns the estimated offset in milliseconds.
+     * Estimates the one-way message delay (network latency) to the device/server in milliseconds.
+     * Can be used to auto-calculate the points offset applied to points sent to the device.
      */
-    long syncClock();
+    long calculateMessageDelay();
 }

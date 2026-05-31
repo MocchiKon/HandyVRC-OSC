@@ -17,7 +17,7 @@ public record ConfigProperties(
         int handyApiVersion,
         int listenOnPort,
         boolean waitForApiResponse,
-        int pointsOffset,
+        Integer pointsOffset,
         int sendMessageEveryMs,
         int minimalValueChange,
         float penetratorLength,

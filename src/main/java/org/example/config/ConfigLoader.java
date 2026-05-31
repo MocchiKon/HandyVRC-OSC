@@ -102,7 +102,7 @@ public class ConfigLoader
                 .avatarParameter(getProperty(properties, "avatarParameter").orElseGet(() -> pickDefaultAvatarParameter(spsType)))
                 .deviceConnectionKey(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "deviceConnectionKey") : null)
                 .waitForApiResponse(Boolean.parseBoolean(getPropertyOrDefault(properties, "waitForApiResponse", "false")))
-                .pointsOffset(Integer.parseInt(getPropertyOrCloseAppWhenBlank(properties, "pointsOffset")))
+                .pointsOffset(getProperty(properties, "pointsOffset").map(Integer::parseInt).orElse(null))
                 .sendMessageEveryMs(Integer.parseInt(getPropertyOrCloseAppWhenBlank(properties, "sendMessageEveryMs")))
                 .minimalValueChange(Integer.parseInt(getPropertyOrDefault(properties, "minimalValueChange", "2")))
                 .penetratorLength(spsType == SpsType.ORIFICE ? Float.parseFloat(getPropertyOrCloseAppWhenBlank(properties, "penetratorLength")) : 0.f)
