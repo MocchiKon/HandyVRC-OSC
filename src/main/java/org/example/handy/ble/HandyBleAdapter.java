@@ -1,7 +1,9 @@
 package org.example.handy.ble;
 
 import lombok.extern.slf4j.Slf4j;
-import org.simplejavable.*;
+import org.simplejavable.Adapter;
+import org.simplejavable.BluetoothUUID;
+import org.simplejavable.Peripheral;
 
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -35,17 +37,13 @@ public class HandyBleAdapter
                 @Override
                 public void onScanFound(Peripheral peripheral)
                 {
-                    if (isHandy(peripheral))
-                    {
-                        handy = peripheral;
-                        log.info("Found Bluetooth adapter: {}", peripheral);
-                    }
+                    if (isHandy(peripheral)) handy = peripheral;
                 }
             });
             log.info("Scanning for BLE devices...");
             long start = System.currentTimeMillis();
             adapter.scanStart();
-            while (handy == null && adapter.getScanIsActive() && (System.currentTimeMillis() - start) < 10_000) // Scan for 10s max
+            while (handy == null && adapter.getScanIsActive() && (System.currentTimeMillis() - start) < 15_000) // Scan for 15s max
             {
                 Thread.sleep(100);
             }
@@ -65,7 +63,11 @@ public class HandyBleAdapter
         log.info("Found Handy: {} ({})", handy.getIdentifier(), handy.getAddress());
         handy.connect();
 
-        handy.notify(SERVICE_BLUETOOTH_UUID, RX_BLUETOOTH_UUID, rxQueue::offer);
+        handy.notify(SERVICE_BLUETOOTH_UUID, RX_BLUETOOTH_UUID, e -> {
+            log.info("BLE device {} notified", handy.getIdentifier());
+            boolean result = rxQueue.offer(e);
+            log.info("BLE device {} result: {}", handy.getIdentifier(), result);
+        });
 
         log.info("Connected and subscribed to BLE notifications.");
     }

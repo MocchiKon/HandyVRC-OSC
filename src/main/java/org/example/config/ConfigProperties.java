@@ -14,6 +14,7 @@ public record ConfigProperties(
         boolean testMode,
         boolean savePointsToFile,
         boolean clamp,
+        boolean pauseOnStarving,
         int handyApiVersion,
         int listenOnPort,
         boolean waitForApiResponse,

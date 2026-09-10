@@ -3,6 +3,7 @@ package org.example.handy.ble;
 import dev.handy.proto.Constants;
 import dev.handy.proto.HandyRpc;
 import dev.handy.proto.Messages;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
@@ -10,10 +11,9 @@ import org.example.handy.common.dto.*;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.Random;
 
 @Slf4j
-public class HandyClientBle implements HandyClient
+public class HandyClientBle extends HandyClient
 {
     private final HandyBleAdapter ble;
     private final HandyRpcClient rpc;
@@ -27,8 +27,8 @@ public class HandyClientBle implements HandyClient
     @Override
     public HandyBaseResponseWithError changeMode(int mode)
     {
-        // BLE does not require explicit mode change — mode is implicit in the commands sent
-        log.info("BLE: changeMode({}) is a no-op, mode is implicit", mode);
+        // BLE does not require explicit mode change - mode is implicit in the commands sent
+        log.debug("BLE: skipping changeMode({}), mode is implicit", mode);
         return new HandyBaseResponseWithError(null);
     }
 
@@ -41,28 +41,31 @@ public class HandyClientBle implements HandyClient
     @Override
     public HandySetupResponse hspSetup()
     {
-        try
-        {
-            int streamId = new Random().nextInt(Integer.MAX_VALUE);
-            log.info("BLE HSP Setup (streamId={})...", streamId);
-
-            HandyRpc.Response resp = rpc.sendRequest(HandyRpc.Request.newBuilder()
-                    .setRequestHspSetup(Messages.RequestHspSetup.newBuilder()
-                            .setStreamId(streamId)
-                            .build()));
-
-            if (resp.hasResponseHspSetup())
-            {
-                Constants.HspState state = resp.getResponseHspSetup().getState();
-                log.info("BLE HSP state: {}, maxPoints={}, state={}", state.getPlayState(), state.getMaxPoints(), state);
-            }
-            // Return mocked response matching API format (no error = success)
-            return new HandySetupResponse(null, new HandySetupResult(0));
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException("BLE hspSetup failed", e);
-        }
+        // BLE does not require hsp setup
+        log.debug("BLE: skipping HSP Setup");
+        return new HandySetupResponse(null, new HandySetupResult(0));
+//        try
+//        {
+//            int streamId = new Random().nextInt(Integer.MAX_VALUE);
+//            log.info("BLE HSP Setup (streamId={})...", streamId);
+//
+//            HandyRpc.Response resp = rpc.sendRequest(HandyRpc.Request.newBuilder()
+//                    .setRequestHspSetup(Messages.RequestHspSetup.newBuilder()
+//                            .setStreamId(streamId)
+//                            .build()));
+//
+//            if (resp.hasResponseHspSetup())
+//            {
+//                Constants.HspState state = resp.getResponseHspSetup().getState();
+//                log.info("BLE HSP state: {}, maxPoints={}, state={}", state.getPlayState(), state.getMaxPoints(), state);
+//            }
+//            // Return mocked response matching API format (no error = success)
+//            return new HandySetupResponse(null, new HandySetupResult(0));
+//        }
+//        catch (Exception e)
+//        {
+//            throw new RuntimeException("BLE hspSetup failed", e);
+//        }
     }
 
     @Override
@@ -114,7 +117,7 @@ public class HandyClientBle implements HandyClient
 
             log.trace("[BLE HSP] Sent {} points", points.size());
 
-            // Return mocked success response — BLE fire-and-forget has no result payload
+            // Return mocked success response - BLE fire-and-forget has no result payload
             return new HandyHspAddResponse(null, new HspState(1, 0, 2));
         }
         catch (Exception e)
@@ -175,32 +178,10 @@ public class HandyClientBle implements HandyClient
     }
 
     @Override
-    public long calculateMessageDelay()
+    @SneakyThrows
+    public void sendRequestForMessageDelayCalc()
     {
-        try
-        {
-            log.info("Measuring BLE message delay...");
-            final int SYNC_SAMPLES = 30;
-            long rtdSum = 0;
-
-            for (int i = 0; i < SYNC_SAMPLES; i++)
-            {
-                long tSend = System.currentTimeMillis();
-                // ClockOffsetGet is used only as a cheap round-trip ping to measure latency
-                rpc.sendRequest(HandyRpc.Request.newBuilder()
-                        .setRequestClockOffsetGet(Messages.RequestClockOffsetGet.getDefaultInstance()));
-                long tReceive = System.currentTimeMillis();
-                rtdSum += tReceive - tSend;
-            }
-
-            long avgRtd = Math.round(rtdSum / (double) SYNC_SAMPLES);
-            long messageDelay = avgRtd / 2; // one-way latency
-            log.info("BLE message delay: messageDelay={}ms, avgRtd={}ms (from {} samples)", messageDelay, avgRtd, SYNC_SAMPLES);
-            return messageDelay;
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException("BLE message delay measurement failed", e);
-        }
+        rpc.sendRequest(HandyRpc.Request.newBuilder()
+                .setRequestClockOffsetGet(Messages.RequestClockOffsetGet.getDefaultInstance()));
     }
 }

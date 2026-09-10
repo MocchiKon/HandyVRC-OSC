@@ -46,6 +46,8 @@ public class HspParameterProcessor implements ParameterProcessor
     private Integer lastX = null;
     private int lastDir = 0;
 
+    private boolean pauseOnStarving;
+
     // Tests only
     HspParameterProcessor(ConfigProperties config)
     {
@@ -59,6 +61,7 @@ public class HspParameterProcessor implements ParameterProcessor
     {
         this.handyClient = handyClient;
         setupProperties(config);
+
         HandyBaseResponseWithError response = this.handyClient.changeMode(HandyModeV3.HSP);
         if (response.error() != null)
         {
@@ -69,14 +72,19 @@ public class HspParameterProcessor implements ParameterProcessor
         {
             delayedClosingWithLog("Could not setup HSP stream (reason: %s). Closing app...".formatted(setupResponse.error().message()));
         }
+
         this.timeOffsetMs = resolvePointsOffset(config);
         this.INIT_TIME_MS = System.currentTimeMillis();
-        HandyBaseResponseWithError playResponse = this.handyClient.hspPlay(0, 0, false);
+        HandyBaseResponseWithError playResponse = this.handyClient.hspPlay(0, 0, pauseOnStarving);
         if (playResponse.error() != null)
         {
             delayedClosingWithLog("Could not play HSP stream (reason: %s). Closing app...".formatted(playResponse.error().message()));
         }
-        this.handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+
+        if (config.sliderMin() != null || config.sliderMax() != null)
+        {
+            this.handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+        }
         Optional<SliderSettingsResult> sliderSettings = this.handyClient.getSliderSettings();
         sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
     }
@@ -91,6 +99,7 @@ public class HspParameterProcessor implements ParameterProcessor
             this.penetratorLength = config.penetratorLength();
             this.savePointsToFile = config.savePointsToFile();
             this.clamp = config.clamp();
+            this.pauseOnStarving = config.pauseOnStarving();
         }
     }
 
@@ -210,7 +219,7 @@ public class HspParameterProcessor implements ParameterProcessor
         List<HspPoint> hspPointsCopy = getAndClearHspPoints();
         savePointsToFileIfRequested(hspPointsCopy);
         lastMessageSentMs = System.currentTimeMillis();
-        Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy)); // TODO Use async instead of starting virtual threads?
+        Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy));
         return lastMessageSentMs;
     }
 

@@ -72,7 +72,7 @@ public class HandyRpcClient
             }
             else // Notification or other message type, discard and keep waiting
             {
-                log.info("Received response with id {}, expected {}, discarding", id, id);
+                log.info("Received non-response message of type {}, discarding", response.getType());
             }
         }
         throw new TimeoutException("Request " + id + " timed out");
