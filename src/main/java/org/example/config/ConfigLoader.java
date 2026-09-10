@@ -77,7 +77,6 @@ public class ConfigLoader
         {
             delayedClosingWithLog("No '%s' spsType available! Check your config file, closing app...".formatted(spsType));
         }
-        // TODO Log loaded config (without keys)
         var connectionModeStr = getPropertyOrDefault(properties, "connectionMode", "API").toUpperCase();
         var connectionMode = EnumUtils.getEnum(ConnectionMode.class, connectionModeStr);
         if (connectionMode == null)
@@ -91,7 +90,7 @@ public class ConfigLoader
         boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
-        return ConfigProperties.builder()
+        var config = ConfigProperties.builder()
                 .connectionMode(connectionMode)
                 .testMode(testMode)
                 .savePointsToFile(savePointsToFile)
@@ -111,6 +110,8 @@ public class ConfigLoader
                 .sliderMax(getProperty(properties, "sliderMax").map(Float::parseFloat).orElse(null))
                 .spsType(spsType)
                 .build();
+        log.info("Loaded config: {}", config.toLoggableString());
+        return config;
     }
 
     private String pickDefaultAvatarParameter(SpsType spsType)
