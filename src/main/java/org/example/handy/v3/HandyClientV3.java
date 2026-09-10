@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 // Firmware 4.x only
 @Slf4j
-public class HandyClientV3 implements HandyClient
+public class HandyClientV3 extends HandyClient
 {
     private static final String BASE_URI = "https://www.handyfeeling.com/api/handy-rest/v3/";
     public static final String DEVICE_CONNECTION_KEY_HEADER = "X-Connection-Key";
@@ -217,29 +217,16 @@ public class HandyClientV3 implements HandyClient
     }
 
     @Override
-    public long calculateMessageDelay()
+    @SneakyThrows
+    public void sendRequestForMessageDelayCalc()
     {
-        final int SYNC_SAMPLES = 30;
-        double rtdSum = 0;
-
-        for (int i = 0; i < SYNC_SAMPLES; i++)
-        {
-            long tSend = System.currentTimeMillis();
-            getServerTime();
-            long tReceive = System.currentTimeMillis();
-            rtdSum += tReceive - tSend;
-        }
-
-        long avgRtd = Math.round(rtdSum / SYNC_SAMPLES);
-        long messageDelay = avgRtd / 2; // one-way latency, independent of server/local clock skew
-        log.info("API message delay calculated: messageDelay={}ms, avgRtd={}ms (from {} samples)", messageDelay, avgRtd, SYNC_SAMPLES);
-        return messageDelay;
+        getSliderSettings();
     }
 
     private boolean attemptRefreshingHttpClient() // Prevent GOAWAY (every 94 requests on my machine)
     {
         int count = requestCount.incrementAndGet();
-        if (count >= 80)
+        if (count >= 30)
         {
             requestCount.set(0);
             httpClient = HttpClient.newHttpClient();

@@ -9,7 +9,6 @@ import org.example.Main;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
-import javax.swing.*;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -89,6 +88,7 @@ public class ConfigLoader
         boolean testMode = Boolean.parseBoolean(getPropertyOrDefault(properties, "testMode", "false"));
         boolean savePointsToFile = Boolean.parseBoolean(getPropertyOrDefault(properties, "savePointsToFile", "false"));
         boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
+        boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
         return ConfigProperties.builder()
@@ -96,6 +96,7 @@ public class ConfigLoader
                 .testMode(testMode)
                 .savePointsToFile(savePointsToFile)
                 .clamp(clamp)
+                .pauseOnStarving(pauseOnStarving)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
                 .processingAlgorithm(processingAlgorithm)
