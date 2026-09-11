@@ -127,6 +127,12 @@ public class HandyClientV3 extends HandyClient
         return objectMapper.readValue(httpResponse.body(), HandySetupResponse.class);
     }
 
+    @Override
+    public HandyBaseResponseWithError hspFlush()
+    {
+        return new HandyBaseResponseWithError(null); // TODO Implement later
+    }
+
     @SneakyThrows
     @Override
     public boolean checkConnectionStatus()

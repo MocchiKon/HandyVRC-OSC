@@ -69,6 +69,26 @@ public class HandyClientBle extends HandyClient
     }
 
     @Override
+    public HandyBaseResponseWithError hspFlush()
+    {
+        try
+        {
+            HandyRpc.Response response = rpc.sendRequest(HandyRpc.Request.newBuilder()
+                    .setRequestHspFlush(Messages.RequestHspFlush.newBuilder()));
+            if (response.hasResponseHspFlush())
+            {
+                Constants.HspState state = response.getResponseHspFlush().getState();
+                log.info("BLE HSP flushed, state={}", state);
+            }
+            return new HandyBaseResponseWithError(null);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException("BLE hspFlush failed", e);
+        }
+    }
+
+    @Override
     public HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving)
     {
         try
@@ -87,7 +107,7 @@ public class HandyClientBle extends HandyClient
             if (resp.hasResponseHspPlay())
             {
                 Constants.HspState state = resp.getResponseHspPlay().getState();
-                log.info("BLE HSP playing, state={}", state.getPlayState());
+                log.info("BLE HSP playing, state={}", state);
             }
             return new HandyBaseResponseWithError(null);
         }
