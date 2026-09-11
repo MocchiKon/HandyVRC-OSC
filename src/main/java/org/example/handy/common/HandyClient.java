@@ -15,6 +15,7 @@ public abstract class HandyClient
     public abstract HandyBaseResponseWithError changeMode(int mode);
     public abstract boolean checkConnectionStatus();
     public abstract HandySetupResponse hspSetup();
+    public abstract HandyBaseResponseWithError hspFlush();
     public abstract HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving);
     public abstract HandyHspAddResponse hspAdd(HspAddRequest requestBody);
     public abstract void setSliderSettings(Float min, Float max);

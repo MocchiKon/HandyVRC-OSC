@@ -72,6 +72,11 @@ public class HspParameterProcessor implements ParameterProcessor
         {
             delayedClosingWithLog("Could not setup HSP stream (reason: %s). Closing app...".formatted(setupResponse.error().message()));
         }
+        HandyBaseResponseWithError flushResponse = this.handyClient.hspFlush();
+        if (flushResponse.error() != null)
+        {
+            delayedClosingWithLog("Could not flush HSP stream (reason: %s). Closing app...".formatted(flushResponse.error().message()));
+        }
 
         this.timeOffsetMs = resolvePointsOffset(config);
         this.INIT_TIME_MS = System.currentTimeMillis();

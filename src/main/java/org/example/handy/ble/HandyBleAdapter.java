@@ -60,7 +60,7 @@ public class HandyBleAdapter
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Handy not found via BLE"));
 
-        log.info("Found Handy: {} ({})", handy.getIdentifier(), handy.getAddress());
+        log.info("Found Handy");
         handy.connect();
 
         handy.notify(SERVICE_BLUETOOTH_UUID, RX_BLUETOOTH_UUID, e -> {
