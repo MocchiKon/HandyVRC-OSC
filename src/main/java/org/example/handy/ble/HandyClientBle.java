@@ -3,6 +3,7 @@ package org.example.handy.ble;
 import dev.handy.proto.Constants;
 import dev.handy.proto.HandyRpc;
 import dev.handy.proto.Messages;
+import handy.model.DeviceModeValue;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.example.handy.common.HandyBaseResponseWithError;
@@ -25,7 +26,7 @@ public class HandyClientBle extends HandyClient
     }
 
     @Override
-    public HandyBaseResponseWithError changeMode(int mode)
+    public HandyBaseResponseWithError changeMode(DeviceModeValue mode)
     {
         // BLE does not require explicit mode change - mode is implicit in the commands sent
         log.debug("BLE: skipping changeMode({}), mode is implicit", mode);

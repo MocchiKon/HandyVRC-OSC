@@ -1,12 +1,12 @@
 package org.example.processor;
 
+import handy.model.DeviceModeValue;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.*;
-import org.example.handy.v3.HandyModeV3;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -62,7 +62,7 @@ public class HspParameterProcessor implements ParameterProcessor
         this.handyClient = handyClient;
         setupProperties(config);
 
-        HandyBaseResponseWithError response = this.handyClient.changeMode(HandyModeV3.HSP);
+        HandyBaseResponseWithError response = this.handyClient.changeMode(DeviceModeValue.HSP);
         if (response.error() != null)
         {
             delayedClosingWithLog("Could not change Handy mode to HSP (reason: %s). Closing app...".formatted(response.error().message()));

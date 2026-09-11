@@ -1690,10 +1690,7 @@ components:
             required: true
             description: A device connection key or a channel reference.
             schema:
-                oneOf:
-                    - $ref: "#/components/schemas/ConnectionKey"
-                    - $ref: "#/components/schemas/ChannelReference"
-            example: "chref:d89dsa9idsadsad"
+                type: string
         EventFilter:
             name: events
             in: query
@@ -1714,63 +1711,63 @@ paths:
               description: The time-to-live (ttl) of the token in seconds. This defines how long the token remains valid. If not specified, a default value is used. Default is 1 hour (3600 seconds). Minimum is 60 seconds, maximum is 24 hours (86400 seconds).
               required: false
               schema:
-                type: integer
-                default: 3600
-                minimum: 60
-                maximum: 86400
+                  type: integer
+                  default: 3600
+                  minimum: 60
+                  maximum: 86400
             - name: to
               in: query
               description: The device connection key for which the token is to be issued. Specifying this parameter restricts the use of the token to the specific device.
               required: false
               schema:
-                type: string
+                  type: string
             - name: ip
               in: query
               description: The client IP address for which the token is to be issued. Specifying this parameter restricts the use of the token to requests originating from the specific IP address.
               required: false
               schema:
-                type: string
+                  type: string
             - name: origin
               in: query
               description: The client Origin header value prefix for which the token is to be issued. Specifying this parameter restricts the use of the token to requests with the specific Origin header value prefix.
               required: false
               schema:
-                type: string
+                  type: string
               example: "https://sweettecheu.s3.eu-central-1.amazonaws.com/scripts/admin/dataset.csv"
             - name: r
               in: query
               description: The client Referer header value prefix for which the token is to be issued. Specifying this parameter restricts the use of the token to requests with the specific Referer header value prefix.
               required: false
               schema:
-                type: string
+                  type: string
               example: "https://sweettecheu.s3.eu-central-1.amazonaws.com/scripts/admin/dataset.csv"
             - name: ua
               in: query
               description: The client User-Agent header value prefix for which the token is to be issued. Specifying this parameter restricts the use of the token to requests with the specific User-Agent header value prefix.
               required: false
               schema:
-                type: string
+                  type: string
               example: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
             - name: al
               in: query
               description: The client Accept-Language header value for which the token is to be issued. Specifying this parameter restricts the use of the token to requests with the specific Accept-Language header value.
               required: false
               schema:
-                type: string
+                  type: string
               example: "en-US"
             - name: ae
               in: query
               description: The client Accept-Encoding header value for which the token is to be issued. Specifying this parameter restricts the use of the token to requests with the specific Accept-Encoding header value.
               required: false
               schema:
-                type: string
+                  type: string
               example: "gzip, deflate, br"
             - name: cc
               in: query
               description: The client Cache-Control header value for which the token is to be issued. Specifying this parameter restricts the use of the token to requests with the specific Cache-Control header value.
               required: false
               schema:
-                type: string
+                  type: string
         get:
             security:
                 - ApiKeyAuth: []
@@ -1819,8 +1816,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HampState"
+                                          result:
+                                              $ref: "#/components/schemas/HampState"
                             examples:
                                 HampStatePlaying:
                                     description: HAMP state playing, up.
@@ -1875,8 +1872,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HampState"
+                                          result:
+                                              $ref: "#/components/schemas/HampState"
                             examples:
                                 HampStatePlaying:
                                     description: HAMP state playing, up.
@@ -1924,8 +1921,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HampState"
+                                          result:
+                                              $ref: "#/components/schemas/HampState"
                             examples:
                                 HampStateStopped:
                                     description: HAMP state stopped, up.
@@ -1985,8 +1982,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HampState"
+                                          result:
+                                              $ref: "#/components/schemas/HampState"
                             examples:
                                 HampStatePlaying:
                                     description: HAMP state playing, up.
@@ -2041,8 +2038,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HampState"
+                                          result:
+                                              $ref: "#/components/schemas/HampState"
                             examples:
                                 HampStatePlaying:
                                     description: HAMP state playing, up.
@@ -2090,8 +2087,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/SliderSettings"
+                                          result:
+                                              $ref: "#/components/schemas/SliderSettings"
                             examples:
                                 SliderSettings:
                                     value:
@@ -2136,8 +2133,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceInfo"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceInfo"
                             examples:
                                 DeviceInfo:
                                     value:
@@ -2185,8 +2182,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceMode"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceMode"
                             examples:
                                 HampMode:
                                     value:
@@ -2307,8 +2304,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            type: string
+                                          result:
+                                              type: string
                             examples:
                                 DeviceOkRsp:
                                     value:
@@ -2390,8 +2387,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceMode"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceMode"
                             examples:
                                 DeviceModeSetOkRsp:
                                     value:
@@ -2464,16 +2461,16 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            description: Connected response
-                                            type: object
-                                            properties:
-                                                connected:
-                                                    type: boolean
-                                                    description: Connected status
-                                                    example: true
-                                            required:
-                                                - connected
+                                          result:
+                                              description: Connected response
+                                              type: object
+                                              properties:
+                                                  connected:
+                                                      type: boolean
+                                                      description: Connected status
+                                                      example: true
+                                              required:
+                                                  - connected
                             examples:
                                 DeviceConnected:
                                     value:
@@ -2814,8 +2811,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceStatistics"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceStatistics"
     /capabilities:
         parameters:
             - $ref: "#/components/parameters/Timeout"
@@ -2837,8 +2834,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceCapabilities"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceCapabilities"
                             examples:
                                 DeviceCapabilities:
                                     value:
@@ -2876,8 +2873,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceSessionIds"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceSessionIds"
                             examples:
                                 DeviceSessionIds:
                                     value:
@@ -2937,7 +2934,7 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result: {}
+                                          result: {}
                             examples:
                                 Ok:
                                     value:
@@ -3036,7 +3033,7 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result: {}
+                                          result: {}
                             examples:
                                 Ok:
                                     value:
@@ -3135,7 +3132,7 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result: {}
+                                          result: {}
                             examples:
                                 Ok:
                                     value:
@@ -3236,7 +3233,7 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result: {}
+                                          result: {}
                             examples:
                                 Ok:
                                     value:
@@ -3333,7 +3330,7 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result: {}
+                                          result: {}
                             examples:
                                 Ok:
                                     value:
@@ -3432,7 +3429,7 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result: {}
+                                          result: {}
                             examples:
                                 Ok:
                                     value:
@@ -3498,8 +3495,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -3587,8 +3584,8 @@ paths:
                                     example: true
                             oneOf:
                                 - $ref: "#/components/schemas/HsspSetupUrl"
-                                  # - $ref: "#/components/schemas/HsspSetupCsv"
-                                  # - $ref: "#/components/schemas/HsspSetupFunscript"
+                                    # - $ref: "#/components/schemas/HsspSetupCsv"
+                                    # - $ref: "#/components/schemas/HsspSetupFunscript"
                         examples:
                             HsspSetupUrl:
                                 value:
@@ -3607,8 +3604,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -3711,8 +3708,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -3791,8 +3788,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -3949,8 +3946,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4048,8 +4045,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4128,8 +4125,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4221,8 +4218,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4330,8 +4327,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4410,8 +4407,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4490,8 +4487,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
     /hsp/threshold:
         parameters:
             - $ref: "#/components/parameters/Timeout"
@@ -4530,8 +4527,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4680,8 +4677,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4783,8 +4780,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4878,8 +4875,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -4973,8 +4970,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -5050,8 +5047,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceTimeInfo"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceTimeInfo"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5106,7 +5103,7 @@ paths:
             - in: query
               name: s
               schema:
-                type: boolean
+                  type: boolean
               example: true
               description: "If true, the clock sync response will be synchronous and the sync result will be returned in the response, in addition to published on the SSE stream. If false, the sync result will only be published on the SSE stream."
         get:
@@ -5125,8 +5122,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/DeviceTimeInfo"
+                                          result:
+                                              $ref: "#/components/schemas/DeviceTimeInfo"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5237,8 +5234,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            type: string
+                                          result:
+                                              type: string
                             examples:
                                 Ok:
                                     value:
@@ -5299,13 +5296,13 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            type: object
-                                            properties:
-                                                offset:
-                                                    $ref: "#/components/schemas/Timestamp"
-                                            required:
-                                                - offset
+                                          result:
+                                              type: object
+                                              properties:
+                                                  offset:
+                                                      $ref: "#/components/schemas/Timestamp"
+                                              required:
+                                                  - offset
                             examples:
                                 OffsetResponsePositive:
                                     value:
@@ -5356,8 +5353,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HvpState"
+                                          result:
+                                              $ref: "#/components/schemas/HvpState"
                             examples:
                                 HvpStateEnabled:
                                     value:
@@ -5459,8 +5456,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HvpState"
+                                          result:
+                                              $ref: "#/components/schemas/HvpState"
                             examples:
                                 HvpStateEnabled:
                                     value:
@@ -5537,8 +5534,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HvpState"
+                                          result:
+                                              $ref: "#/components/schemas/HvpState"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5608,8 +5605,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HvpState"
+                                          result:
+                                              $ref: "#/components/schemas/HvpState"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5677,8 +5674,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/SliderState"
+                                          result:
+                                              $ref: "#/components/schemas/SliderState"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5756,8 +5753,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/StrokeSettingsRsp"
+                                          result:
+                                              $ref: "#/components/schemas/StrokeSettingsRsp"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5821,8 +5818,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/StrokeSettingsRsp"
+                                          result:
+                                              $ref: "#/components/schemas/StrokeSettingsRsp"
                             examples:
                                 DeviceResponse:
                                     value:
@@ -5913,8 +5910,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -6019,8 +6016,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -6099,8 +6096,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -6179,8 +6176,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:
@@ -6282,8 +6279,8 @@ paths:
                                     - $ref: "#/components/schemas/DeviceResponse"
                                     - type: object
                                       properties:
-                                        result:
-                                            $ref: "#/components/schemas/HspState"
+                                          result:
+                                              $ref: "#/components/schemas/HspState"
                             examples:
                                 Ok:
                                     value:

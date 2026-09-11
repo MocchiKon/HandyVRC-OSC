@@ -1,18 +1,22 @@
 package org.example.handy.v3;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import handy.api.HspApi;
+import handy.api.InfoApi;
+import handy.api.SliderApi;
+import handy.api.UtilsApi;
+import handy.invoker.ApiClient;
+import handy.model.*;
+import handy.model.HspState;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.ObjectUtils;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
+import org.example.handy.common.HandyError;
 import org.example.handy.common.dto.*;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -20,90 +24,87 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 public class HandyClientV3 extends HandyClient
 {
-    private static final String BASE_URI = "https://www.handyfeeling.com/api/handy-rest/v3/";
-    public static final String DEVICE_CONNECTION_KEY_HEADER = "X-Connection-Key";
-    public static final String APPLICATION_ID_KEY_HEADER = "X-Api-Key";
     private final String deviceConnectionKey;
     private final String applicationId;
-    private volatile HttpClient httpClient;
-    private final ObjectMapper objectMapper;
-    int requestSum = 0;
-    int requestNo = 0;
+    private volatile HspApi hspApi;
+    private volatile InfoApi infoApi;
+    private volatile SliderApi sliderApi;
+    private volatile UtilsApi utilsApi;
     private final AtomicInteger requestCount = new AtomicInteger(0);
 
     public HandyClientV3(String deviceConnectionKey, String applicationId)
     {
-        this.httpClient = HttpClient.newHttpClient();
         this.deviceConnectionKey = deviceConnectionKey;
         this.applicationId = applicationId;
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        rebuildApiClients();
+    }
+
+    private synchronized void rebuildApiClients()
+    {
+        ApiClient authenticatedClient = newAuthenticatedApiClient();
+        this.hspApi = new HspApi(authenticatedClient);
+        this.infoApi = new InfoApi(authenticatedClient);
+        this.sliderApi = new SliderApi(authenticatedClient);
+        this.utilsApi = new UtilsApi(authenticatedClient);
+    }
+
+    private ApiClient newAuthenticatedApiClient()
+    {
+        var client = new ApiClient();
+        HandyApiClientAuth.applyApiKey(client, applicationId);
+        return client;
     }
 
     @SneakyThrows
     @Override
-    public HandyBaseResponseWithError changeMode(int mode)
+    public HandyBaseResponseWithError changeMode(DeviceModeValue mode)
     {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "mode"))
-                .header("accept", "application/json")
-                .header("Content-Type", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .PUT(HttpRequest.BodyPublishers.ofString("{\"mode\":%s}".formatted(mode)))
-                .build();
-        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        return objectMapper.readValue(httpResponse.body(), HandyBaseResponseWithError.class);
+        var setModeRequest = new SetModeRequest();
+        setModeRequest.setMode(mode);
+        var response = infoApi.setMode2(deviceConnectionKey, setModeRequest, null);
+        return new HandyBaseResponseWithError(toHandyError(response.getError()));
     }
 
     @SneakyThrows
     @Override
     public HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving)
     {
-        String body = "{\"start_time\":%s,\"server_time\":%s,\"playback_rate\":1,\"pause_on_starving\":%s,\"loop\":false}".formatted(startTime, serverTime, pauseOnStarving);
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "hsp/play"))
-                .header("accept", "application/json")
-                .header("Content-Type", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .PUT(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        log.info("Starting HSP stream ({})", body);
-        var httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        log.info("Started HSP stream (response=[{}])", httpResponse.body());
-        return objectMapper.readValue(httpResponse.body(), HandyBaseResponseWithError.class);
+        var playRequest = new HspPlayRequest();
+        playRequest.setStartTime(Math.toIntExact(startTime));
+        playRequest.setServerTime(Math.toIntExact(serverTime));
+        playRequest.setPlaybackRate(BigDecimal.ONE);
+        playRequest.setPauseOnStarving(pauseOnStarving);
+        playRequest.setLoop(false);
+        log.info("Starting HSP stream ({})", playRequest);
+        var response = hspApi.hspPlay(deviceConnectionKey, playRequest, null);
+        log.info("Started HSP stream (response=[{}])", response);
+        return new HandyBaseResponseWithError(toHandyError(response.getError()));
     }
 
     @SneakyThrows
     @Override
     public HandyHspAddResponse hspAdd(HspAddRequest requestBody)
     {
-        String body = objectMapper.writeValueAsString(requestBody);
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "hsp/add"))
-                .header("accept", "application/json")
-                .header("Content-Type", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .PUT(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        log.trace("Sending points to HSP stream ({})", body);
-        long start = System.currentTimeMillis();
-        var httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        attemptRefreshingHttpClient();
-        if (log.isTraceEnabled())
+        var hspAdd = new HspAdd();
+        List<Point> points = new ArrayList<>(requestBody.points().size());
+        for (HspPoint point : requestBody.points())
         {
-            long tookMs = System.currentTimeMillis() - start;
-            requestSum += (int) tookMs;
-            requestNo++;
-            log.trace("Request took {} ms, current average {} ms", tookMs, requestSum / requestNo);
+            var apiPoint = new Point();
+            apiPoint.setT(point.t());
+            apiPoint.setX(point.x());
+            points.add(apiPoint);
         }
-        HandyHspAddResponse handyHspAddResponse = objectMapper.readValue(httpResponse.body(), HandyHspAddResponse.class);
-        log.trace("Sent points to HSP stream (response={})", httpResponse.body());
+        hspAdd.setPoints(points);
+        hspAdd.setFlush(requestBody.flush());
+
+        log.trace("Sending points to HSP stream ({})", hspAdd);
+        var response = hspApi.hspAdd(deviceConnectionKey, hspAdd, null);
+        attemptRefreshingApiClients();
+        var handyHspAddResponse = new HandyHspAddResponse(toHandyError(response.getError()), toHspState(response.getResult()));
+        log.trace("Sent points to HSP stream (response={})", response);
         if (handyHspAddResponse.error() == null && handyHspAddResponse.result() == null)
         {
-            log.error("Recieved potentially empty response ({})", httpResponse.body());
+            log.error("Recieved potentially empty response ({})", response);
         }
         return handyHspAddResponse;
     }
@@ -112,114 +113,90 @@ public class HandyClientV3 extends HandyClient
     @Override
     public HandySetupResponse hspSetup()
     {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "hsp/setup"))
-                .header("accept", "application/json")
-                .header("Content-Type", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .PUT(HttpRequest.BodyPublishers.ofString("{\"stream_id\":1}"))
-                .build();
+        var setupRequest = new HspSetupRequest();
+        setupRequest.setStreamId(1);
         log.info("Initializing HSP stream with id 1");
-        var httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        var response = hspApi.hspSetup(deviceConnectionKey, null, setupRequest);
         // NOTE: current_time - ms since device boot
-        log.info("Initialized HSP stream with id 1 ({})", httpResponse.body());
-        return objectMapper.readValue(httpResponse.body(), HandySetupResponse.class);
+        log.info("Initialized HSP stream with id 1 ({})", response);
+        return toSetupResponse(response);
     }
 
+    @SneakyThrows
     @Override
     public HandyBaseResponseWithError hspFlush()
     {
-        return new HandyBaseResponseWithError(null); // TODO Implement later
+        var response = hspApi.hspFlush(deviceConnectionKey, null);
+        return new HandyBaseResponseWithError(toHandyError(response.getError()));
     }
 
     @SneakyThrows
     @Override
     public boolean checkConnectionStatus()
     {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "connected"))
-                .header("accept", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .GET()
-                .build();
-        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        ConnectionStatusResponse response = objectMapper.readValue(httpResponse.body(), ConnectionStatusResponse.class);
-        if (response.result() == null)
+        var response = infoApi.isConnected(deviceConnectionKey, null);
+        if (response.getResult() == null)
         {
             log.error("Error when checking connection to Handy! (reason: {})", response);
             return false;
         }
-        return response.result().connected();
+        return Boolean.TRUE.equals(response.getResult().getConnected());
     }
 
     @SneakyThrows
     @Override
     public Optional<SliderSettingsResult> getSliderSettings()
     {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "slider/stroke"))
-                .header("accept", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .GET()
-                .build();
-        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        SliderSettingsResponse response = objectMapper.readValue(httpResponse.body(), SliderSettingsResponse.class);
-        if (response.result() == null)
+        var response = sliderApi.getStroke(deviceConnectionKey, null);
+        if (response.getResult() == null)
         {
             log.error("Error when checking slider settings! (reason: {})", response);
             return Optional.empty();
         }
-        return Optional.of(response.result());
+        return Optional.of(new SliderSettingsResult(toPlainString(response.getResult().getMin()), toPlainString(response.getResult().getMax())));
     }
 
     @SneakyThrows
     @Override
     public void setSliderSettings(Float min, Float max)
     {
-        String body;
-        if (ObjectUtils.allNotNull(min, max))
-        {
-            body = "{\"min\":%s, \"max\":%s}".formatted(min, max);
-        }
-        else if (min != null)
-        {
-            body = "{\"min\":%s}".formatted(min);
-        }
-        else if (max != null)
-        {
-            body = "{\"max\":%s}".formatted(max);
-        }
-        else
+        if (min == null && max == null)
         {
             return;
         }
 
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "slider/stroke"))
-                .header("accept", "application/json")
-                .header("Content-Type", "application/json")
-                .header(DEVICE_CONNECTION_KEY_HEADER, deviceConnectionKey)
-                .header(APPLICATION_ID_KEY_HEADER, applicationId)
-                .PUT(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        log.info("Setting slider limits {}...", body);
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        BigDecimal resolvedMin = min != null ? BigDecimal.valueOf(min.doubleValue()) : null;
+        BigDecimal resolvedMax = max != null ? BigDecimal.valueOf(max.doubleValue()) : null;
+        if (resolvedMin == null || resolvedMax == null)
+        {
+            var current = sliderApi.getStroke(deviceConnectionKey, null);
+            if (current.getResult() == null)
+            {
+                log.error("Error when reading slider settings before update! (reason: {})", current);
+                return;
+            }
+            if (resolvedMin == null)
+            {
+                resolvedMin = current.getResult().getMin();
+            }
+            if (resolvedMax == null)
+            {
+                resolvedMax = current.getResult().getMax();
+            }
+        }
+
+        var strokeSettings = new StrokeSettings();
+        strokeSettings.setMin(resolvedMin);
+        strokeSettings.setMax(resolvedMax);
+        log.info("Setting slider limits min={}, max={}...", resolvedMin, resolvedMax);
+        sliderApi.setStroke(deviceConnectionKey, strokeSettings, null);
     }
 
     @SneakyThrows
     public long getServerTime()
     {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(BASE_URI + "servertime"))
-                .header("accept", "application/json")
-                .GET()
-                .build();
-        HttpResponse<String> httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        var node = objectMapper.readTree(httpResponse.body());
-        return node.get("server_time").asLong();
+        var response = utilsApi.getServerTime();
+        return response.getServerTime().longValue();
     }
 
     @Override
@@ -229,16 +206,58 @@ public class HandyClientV3 extends HandyClient
         getSliderSettings();
     }
 
-    private boolean attemptRefreshingHttpClient() // Prevent GOAWAY (every 94 requests on my machine)
+    private boolean attemptRefreshingApiClients() // Prevent GOAWAY (every 94 requests on my machine)
     {
         int count = requestCount.incrementAndGet();
         if (count >= 30)
         {
             requestCount.set(0);
-            httpClient = HttpClient.newHttpClient();
-            log.trace("Refreshed http client");
+            rebuildApiClients();
+            log.trace("Refreshed API clients");
             return true;
         }
         return false;
+    }
+
+    private HandyError toHandyError(DeviceError error)
+    {
+        if (error == null)
+        {
+            return null;
+        }
+        return new HandyError(error.getCode() != null ? error.getCode() : 0,
+                error.getName(),
+                error.getMessage(),
+                Boolean.TRUE.equals(error.getConnected()));
+    }
+
+    private org.example.handy.common.dto.HspState toHspState(HspState state)
+    {
+        if (state == null)
+        {
+            return null;
+        }
+        return new org.example.handy.common.dto.HspState(state.getCurrentTime() != null ? state.getCurrentTime() : 0,
+                state.getFirstPointTime(),
+                state.getLastPointTime());
+    }
+
+    private HandySetupResponse toSetupResponse(GetHsspState200Response response)
+    {
+        if (response == null)
+        {
+            return new HandySetupResponse(null, null);
+        }
+        HandySetupResult result = null;
+        if (response.getResult() != null && response.getResult().getCurrentTime() != null)
+        {
+            result = new HandySetupResult(response.getResult().getCurrentTime());
+        }
+        return new HandySetupResponse(toHandyError(response.getError()), result);
+    }
+
+    private String toPlainString(BigDecimal value)
+    {
+        return value != null ? value.toPlainString() : null;
     }
 }

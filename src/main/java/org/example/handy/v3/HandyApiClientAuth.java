@@ -14,27 +14,41 @@ import java.util.function.Consumer;
  * to each request through the ApiClient request interceptor.</p>
  **/
 @NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
-public final class HandyApiClientAuth {
+public final class HandyApiClientAuth
+{
     public static final String API_KEY_HEADER = "X-Api-Key";
+    public static final String CONNECTION_KEY_HEADER = "X-Connection-Key";
     public static final String AUTHORIZATION_HEADER = "Authorization";
     public static final String BEARER_PREFIX = "Bearer ";
 
-    public static ApiClient applyApiKey(ApiClient apiClient, String apiKey) {
+    public static ApiClient applyApiKey(ApiClient apiClient, String apiKey)
+    {
         requireNonBlank(apiClient, "apiClient");
         requireNonBlank(apiKey, "apiKey");
         return appendInterceptor(apiClient, builder -> builder.setHeader(API_KEY_HEADER, apiKey));
     }
 
-    public static ApiClient applyBearerToken(ApiClient apiClient, String bearerToken) {
+    public static ApiClient applyConnectionKey(ApiClient apiClient, String connectionKey)
+    {
+        requireNonBlank(apiClient, "apiClient");
+        requireNonBlank(connectionKey, "connectionKey");
+        return appendInterceptor(apiClient, builder -> builder.setHeader(CONNECTION_KEY_HEADER, connectionKey));
+    }
+
+    public static ApiClient applyBearerToken(ApiClient apiClient, String bearerToken)
+    {
         requireNonBlank(apiClient, "apiClient");
         requireNonBlank(bearerToken, "bearerToken");
         return appendInterceptor(apiClient, builder -> builder.setHeader(AUTHORIZATION_HEADER, BEARER_PREFIX + bearerToken));
     }
 
-    private static ApiClient appendInterceptor(ApiClient apiClient, Consumer<HttpRequest.Builder> additionalInterceptor) {
+    private static ApiClient appendInterceptor(ApiClient apiClient, Consumer<HttpRequest.Builder> additionalInterceptor)
+    {
         Consumer<HttpRequest.Builder> existingInterceptor = apiClient.getRequestInterceptor();
-        apiClient.setRequestInterceptor(builder -> {
-            if (existingInterceptor != null) {
+        apiClient.setRequestInterceptor(builder ->
+        {
+            if (existingInterceptor != null)
+            {
                 existingInterceptor.accept(builder);
             }
             additionalInterceptor.accept(builder);
@@ -42,13 +56,15 @@ public final class HandyApiClientAuth {
         return apiClient;
     }
 
-    private static void requireNonBlank(Object value, String name) {
-        if (value == null) {
+    private static void requireNonBlank(Object value, String name)
+    {
+        if (value == null)
+        {
             throw new IllegalArgumentException(name + " must not be null");
         }
-        if (value instanceof String s && s.isBlank()) {
+        if (value instanceof String s && s.isBlank())
+        {
             throw new IllegalArgumentException(name + " must not be blank");
         }
     }
 }
-

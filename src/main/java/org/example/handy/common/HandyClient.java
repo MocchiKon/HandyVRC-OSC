@@ -1,5 +1,6 @@
 package org.example.handy.common;
 
+import handy.model.DeviceModeValue;
 import lombok.extern.slf4j.Slf4j;
 import org.example.handy.common.dto.HandyHspAddResponse;
 import org.example.handy.common.dto.HandySetupResponse;
@@ -12,7 +13,7 @@ import java.util.Optional;
 @Slf4j
 public abstract class HandyClient
 {
-    public abstract HandyBaseResponseWithError changeMode(int mode);
+    public abstract HandyBaseResponseWithError changeMode(DeviceModeValue mode);
     public abstract boolean checkConnectionStatus();
     public abstract HandySetupResponse hspSetup();
     public abstract HandyBaseResponseWithError hspFlush();
