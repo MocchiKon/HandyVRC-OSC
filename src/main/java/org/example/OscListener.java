@@ -1,13 +1,19 @@
 package org.example;
 
-import com.illposed.osc.OSCMessage;
-import com.illposed.osc.OSCMessageListener;
+import com.illposed.osc.*;
+import com.illposed.osc.argument.OSCTimeTag64;
 import com.illposed.osc.messageselector.OSCPatternAddressMessageSelector;
 import com.illposed.osc.transport.OSCPortIn;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -17,33 +23,125 @@ public class OscListener
 
     public OscListener(int portIn) throws IOException
     {
-        this.oscListener = new OSCPortIn(portIn);
+        // Listeners are added from another thread while the listening thread dispatches received packets,
+        // so a thread-safe list is used instead of the plain one created by the OSCPortIn constructor
+        this.oscListener = new OSCPortIn(
+                new OSCSerializerAndParserBuilder(),
+                new CopyOnWriteArrayList<>(OSCPortIn.defaultPacketListeners()),
+                new InetSocketAddress(portIn));
         this.oscListener.setDaemonListener(false);
         this.oscListener.startListening();
         log.info("Listening for OSC messages on port {}...", portIn);
     }
 
-    public <T> void registerListener(String messageSelector, Consumer<T> valueConsumer)
+    /**
+     * Registers a listener that is called once for every received OSC packet (either a single message or a whole
+     * bundle) with the values of all parameters in that packet whose address matches one of {@code addressPatterns}
+     * (OSC wildcards like '*' are supported).
+     * <p>
+     * The values are keyed by the pattern that matched, so they are looked up with the same pattern they were
+     * registered with. Parameters that are not part of the received packet are missing from the map, and packets
+     * that contain none of the registered parameters do not call the listener at all.
+     * Thanks to this, parameters that VRChat sends together - for example the root and the tip proximity of the
+     * same penetrator - are always handled together, in one call and regardless of their order in the packet.
+     */
+    public void registerPacketListener(List<String> addressPatterns, Consumer<Map<String, Float>> valuesConsumer)
     {
-        OSCMessageListener messageListener = (event) ->
+        List<AddressPattern> patterns = new ArrayList<>(addressPatterns.size());
+        for (String addressPattern : addressPatterns)
+        {
+            patterns.add(new AddressPattern(addressPattern, new OSCPatternAddressMessageSelector(addressPattern)));
+        }
+        oscListener.addPacketListener(new PacketListener(patterns, valuesConsumer));
+    }
+
+    /** Stops listening for OSC messages. */
+    public void close()
+    {
+        oscListener.stopListening();
+    }
+
+    /** OSC address pattern (as configured) together with a matcher for it. */
+    private record AddressPattern(String address, OSCPatternAddressMessageSelector selector)
+    {
+    }
+
+    @RequiredArgsConstructor
+    private static class PacketListener implements OSCPacketListener
+    {
+        private final List<AddressPattern> patterns;
+        private final Consumer<Map<String, Float>> valuesConsumer;
+
+        @Override
+        public void handlePacket(OSCPacketEvent event)
         {
             try
             {
-                OSCMessage message = event.getMessage();
-                String address = message.getAddress();
-                List<Object> arguments = message.getArguments();
-                if (arguments.isEmpty())
+                Map<String, Float> values = new LinkedHashMap<>();
+                collectValues(event.getPacket(), values);
+                if (values.isEmpty())
                 {
-                    log.error("Empty arguments for {}", address);
-                    return;
+                    return; // Nothing we listen for in this packet
                 }
-                valueConsumer.accept((T) arguments.getFirst()); // TODO Dynamic check and error
+                valuesConsumer.accept(values);
             }
-            catch (Exception e) // TODO Better try-catch
+            catch (Exception e)
             {
-                log.error("Exception during osc message handling!", e);
+                // Never let an exception escape, otherwise the OSC listening thread would die
+                log.error("Exception during OSC message handling!", e);
             }
-        };
-        oscListener.getDispatcher().addListener(new OSCPatternAddressMessageSelector(messageSelector), messageListener);
+        }
+
+        @Override
+        public void handleBadData(OSCBadDataEvent event)
+        {
+            log.error("Could not parse received OSC packet: {}", event.getException().getMessage());
+        }
+
+        private void collectValues(OSCPacket packet, Map<String, Float> values)
+        {
+            if (packet instanceof OSCBundle bundle)
+            {
+                for (OSCPacket packetInBundle : bundle.getPackets())
+                {
+                    collectValues(packetInBundle, values);
+                }
+                return;
+            }
+            if (!(packet instanceof OSCMessage message))
+            {
+                return;
+            }
+            OSCMessageEvent messageEvent = new OSCMessageEvent(this, OSCTimeTag64.IMMEDIATE, message);
+            for (AddressPattern pattern : patterns)
+            {
+                if (!pattern.selector().matches(messageEvent))
+                {
+                    continue;
+                }
+                Float value = getFirstArgumentAsFloat(message);
+                if (value != null)
+                {
+                    values.put(pattern.address(), value);
+                }
+            }
+        }
+
+        private Float getFirstArgumentAsFloat(OSCMessage message)
+        {
+            List<Object> arguments = message.getArguments();
+            if (arguments.isEmpty())
+            {
+                log.error("Empty arguments for {}", message.getAddress());
+                return null;
+            }
+            Object firstArgument = arguments.getFirst();
+            if (!(firstArgument instanceof Number number))
+            {
+                log.error("Expected a number but got '{}' for {}", firstArgument, message.getAddress());
+                return null;
+            }
+            return number.floatValue();
+        }
     }
 }

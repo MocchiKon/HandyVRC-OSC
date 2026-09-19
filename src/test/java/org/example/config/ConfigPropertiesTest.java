@@ -27,7 +27,6 @@ class ConfigPropertiesTest
                 .pointsOffset(5)
                 .sendMessageEveryMs(200)
                 .minimalValueChange(2)
-                .penetratorLength(0.5f)
                 .sliderMin(0.0f)
                 .sliderMax(1.0f)
                 .spsType(SpsType.PENETRATOR)

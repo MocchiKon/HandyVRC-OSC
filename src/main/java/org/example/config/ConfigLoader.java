@@ -22,6 +22,9 @@ import static org.example.Main.delayedClosingWithLog;
 @Slf4j
 public class ConfigLoader
 {
+    private static final String NEW_ROOT_SUFFIX = "NewRoot";
+    private static final String NEW_TIP_SUFFIX = "NewTip";
+
     private final Path appConfigPath;
 
     @SneakyThrows
@@ -90,6 +93,23 @@ public class ConfigLoader
         boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
+
+        String avatarParameter = getProperty(properties, "avatarParameter").orElseGet(() -> pickDefaultAvatarParameter(spsType));
+        String penetratorTipParameter = null;
+        if (spsType == SpsType.ORIFICE)
+        {
+            penetratorTipParameter = findPenetratorTipParameter(properties, avatarParameter);
+            if (penetratorTipParameter == null)
+            {
+                delayedClosingWithLog(("The tip proximity parameter needed to auto-detect the penetrator length could not be "
+                        + "derived from avatarParameter '%s' (its 'NewRoot' suffix is replaced with 'NewTip'). Either use a "
+                        + "'NewRoot' avatar parameter (for example '/avatar/parameters/OGB/Orf/*/PenOthersNewRoot') or set "
+                        + "'penetratorTipParameter' in the config. Closing app...")
+                        .formatted(avatarParameter));
+            }
+            log.info("Penetrator length will be auto-detected from root proximity '{}' and tip proximity '{}'", avatarParameter, penetratorTipParameter);
+        }
+
         var config = ConfigProperties.builder()
                 .connectionMode(connectionMode)
                 .testMode(testMode)
@@ -99,19 +119,42 @@ public class ConfigLoader
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
                 .processingAlgorithm(processingAlgorithm)
-                .avatarParameter(getProperty(properties, "avatarParameter").orElseGet(() -> pickDefaultAvatarParameter(spsType)))
+                .avatarParameter(avatarParameter)
                 .deviceConnectionKey(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "deviceConnectionKey") : null)
                 .waitForApiResponse(Boolean.parseBoolean(getPropertyOrDefault(properties, "waitForApiResponse", "false")))
                 .pointsOffset(getProperty(properties, "pointsOffset").map(Integer::parseInt).orElse(null))
                 .sendMessageEveryMs(Integer.parseInt(getPropertyOrCloseAppWhenBlank(properties, "sendMessageEveryMs")))
                 .minimalValueChange(Integer.parseInt(getPropertyOrDefault(properties, "minimalValueChange", "2")))
-                .penetratorLength(spsType == SpsType.ORIFICE ? Float.parseFloat(getPropertyOrCloseAppWhenBlank(properties, "penetratorLength")) : 0.f)
+                .penetratorTipParameter(penetratorTipParameter)
                 .sliderMin(getProperty(properties, "sliderMin").map(Float::parseFloat).orElse(null))
                 .sliderMax(getProperty(properties, "sliderMax").map(Float::parseFloat).orElse(null))
                 .spsType(spsType)
                 .build();
         log.info("Loaded config: {}", config.toLoggableString());
         return config;
+    }
+
+    /**
+     * Resolves the OSC parameter that carries the tip proximity used to auto-detect the penetrator length.
+     * Uses 'penetratorTipParameter' when provided, otherwise derives it from the configured root parameter
+     * by replacing its 'NewRoot' suffix with 'NewTip' (for example
+     * '/avatar/parameters/OGB/Orf/&lt;socket&gt;/PenOthersNewRoot' becomes
+     * '/avatar/parameters/OGB/Orf/&lt;socket&gt;/PenOthersNewTip').
+     *
+     * @return resolved tip parameter or null when it cannot be determined
+     */
+    private String findPenetratorTipParameter(Properties properties, String avatarParameter)
+    {
+        Optional<String> configured = getProperty(properties, "penetratorTipParameter");
+        if (configured.isPresent())
+        {
+            return configured.get();
+        }
+        if (avatarParameter != null && avatarParameter.endsWith(NEW_ROOT_SUFFIX))
+        {
+            return avatarParameter.substring(0, avatarParameter.length() - NEW_ROOT_SUFFIX.length()) + NEW_TIP_SUFFIX;
+        }
+        return null;
     }
 
     private String pickDefaultAvatarParameter(SpsType spsType)

@@ -6,12 +6,99 @@ import org.example.config.ConfigProperties;
 import org.example.handy.common.dto.HspPoint;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class HspParameterProcessorTest
 {
+    @Test
+    void orificeStaysFullyOutUntilPenetratorLengthIsDetected()
+    {
+        var processor = orificeProcessor();
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+
+        processor.actOnProximityChange(1.f, 1.f); // Fully inserted, but the length is not detected yet
+
+        assertThat(positions).containsExactly(100); // 100 = top = fully out
+    }
+
+    @Test
+    void orificeUsesAutoDetectedPenetratorLength()
+    {
+        float rootProximity = 0.5f;
+        float tipProximity = 0.55f; // 5cm long penetrator, both values sent in one OSC packet
+        var processor = orificeProcessor();
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+        for (int i = 0; i < 4; i++) // Length is trusted after a few consistent samples
+        {
+            processor.actOnProximityChange(rootProximity, tipProximity);
+        }
+        positions.clear();
+
+        processor.actOnProximityChange(1.f, tipProximity); // Nothing is exposed, so fully inserted
+        processor.actOnProximityChange(rootProximity, tipProximity); // 0.5m exposed of a 0.05m long penetrator
+
+        assertThat(positions).containsExactly(0, 100); // 0 = bottom = fully inserted
+    }
+
+    @Test
+    void orificeMovesOnPacketsWithoutTipProximity()
+    {
+        float rootProximity = 0.5f;
+        float tipProximity = 0.55f;
+        var processor = orificeProcessor();
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+        for (int i = 0; i < 4; i++)
+        {
+            processor.actOnProximityChange(rootProximity, tipProximity);
+        }
+        positions.clear();
+
+        // VRChat does not resend a parameter that did not change, so only the root proximity arrives
+        processor.actOnProximityChange(1.f, null);
+
+        assertThat(positions).containsExactly(0);
+    }
+
+    @Test
+    void orificeDoesNotMoveOnPacketsWithoutRootProximity()
+    {
+        var processor = orificeProcessor();
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+
+        processor.actOnProximityChange(null, 0.9f); // Only the tip proximity changed
+
+        assertThat(positions).isEmpty(); // Movement is driven by the root proximity only
+    }
+
+    @Test
+    void penetratorUsesValueAsPenetrationAndIgnoresProximities()
+    {
+        var processor = new HspParameterProcessor(ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .build());
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+
+        processor.actOnProximityChange(0.9f, 0.95f); // Only used for orifice
+        processor.actOnValueChange(0.25f);
+
+        assertThat(positions).containsExactly(75);
+    }
+
+    private static HspParameterProcessor orificeProcessor()
+    {
+        return new HspParameterProcessor(ConfigProperties.builder()
+                .spsType(SpsType.ORIFICE)
+                .build());
+    }
+
     @Test
     void clampPointsForFirstMessage()
     {

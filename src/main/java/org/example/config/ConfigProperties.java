@@ -22,7 +22,7 @@ public record ConfigProperties(
         Integer pointsOffset,
         int sendMessageEveryMs,
         int minimalValueChange,
-        float penetratorLength,
+        String penetratorTipParameter,
         Float sliderMin,
         Float sliderMax,
         SpsType spsType
@@ -51,7 +51,7 @@ public record ConfigProperties(
                 ", pointsOffset=" + pointsOffset +
                 ", sendMessageEveryMs=" + sendMessageEveryMs +
                 ", minimalValueChange=" + minimalValueChange +
-                ", penetratorLength=" + penetratorLength +
+                ", penetratorTipParameter='" + penetratorTipParameter + '\'' +
                 ", sliderMin=" + sliderMin +
                 ", sliderMax=" + sliderMax +
                 ", spsType=" + spsType +

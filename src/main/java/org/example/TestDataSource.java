@@ -5,12 +5,19 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.function.Consumer;
 
 /**
- * Generates fake sawtooth wave value changes for testing without VRC/OSC.
- * Produces a 0->1->0 sawtooth pattern.
+ * Generates fake value changes for testing without VRC/OSC.
+ * Produces a 0->1->0 sawtooth pattern: for PENETRATOR spsType it is the penetration amount,
+ * for ORIFICE spsType it is the insertion amount (0 = penetrator fully out, 1 = fully inserted).
  */
 @Slf4j
 public class TestDataSource
 {
+    /**
+     * Length (in meters) of the fake penetrator used to derive the tip proximity in ORIFICE spsType.
+     * The tip proximity is intentionally not capped at 1 - the detector tolerates it and capping would
+     * make the measured length shorter than the simulated one.
+     */
+    public static final float SIMULATED_PENETRATOR_LENGTH = 0.1f;
     private static final int INTERVAL_MS = 50;
     private static final int CYCLE_MS = 800;
     private static final int HALF_CYCLE = CYCLE_MS / 2;
@@ -53,7 +60,7 @@ public class TestDataSource
         }
     }
 
-    // Currently supports only PENETRATOR spsType, ORIFICE requires penetratorLength = 1.0
+    // 0 -> 1 -> 0. Meaning of the value depends on spsType (see class javadoc)
     private float calculateSawtoothValue(long elapsedMs)
     {
         long timeInCycle = elapsedMs % CYCLE_MS;

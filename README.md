@@ -30,13 +30,12 @@ Then run the app by double-clicking "start.bat" file. GUI only displays current 
    (recommended `sliderMin=0` and `sliderMax=1` for full range)
 4. Avatar positioning during 'act' is very important due to how SPS works. Handy stability, range and movement speed matters, if it's too low
    Handy may not be able to perform small movements in satisfying way. Therefore, handjobs work the best.
-   <br/>TIP: (ORIFICE `spsType` only) If you feel like movements are too small and movements are performed correctly (towards base of penetrator) then you
-   can try setting `penetratorLength` to lower value than actual length. This will make small movements feel bigger. (Currently not possible in PENETRATOR mode)
+   <br/>NOTE: (ORIFICE `spsType` only) Penetrator length is auto-detected from the SPS root/tip proximity parameters, so `avatarParameter` has to be a `NewRoot` parameter (the `NewTip` one is derived from it).
 
 ## TODO
 Hopefully I will have time and will to implement these one day (probably not as long as I don't need these in my use-case):
 - [ ] Auto update checking
 - [ ] Penetration multiplier (for better blowjobs in PENETRATOR mode)
-- [ ] Penetrator length auto-detection
+- [x] Penetrator length auto-detection
 - [ ] Default delay calculation
 - [x] Bluetooth
