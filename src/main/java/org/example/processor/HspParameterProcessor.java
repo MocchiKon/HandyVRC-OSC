@@ -31,8 +31,9 @@ public class HspParameterProcessor implements ParameterProcessor
     private int timeOffsetMs;
     private int timeBetweenMessages; // Difference between TIME_OFFSET_MS and this should account for delay to reach handy so that 1st point gets played
     private int minimalValueChange;
-    private float penetratorLength;
     private SpsType spsType;
+    /** Used to auto-detect the penetrator length. Null unless spsType is ORIFICE. */
+    private PenetratorLengthDetector penetratorLengthDetector;
 
     private Consumer<Integer> onValueChange;
 
@@ -101,7 +102,8 @@ public class HspParameterProcessor implements ParameterProcessor
             this.timeBetweenMessages = config.sendMessageEveryMs();
             this.minimalValueChange = config.minimalValueChange();
             this.spsType = config.spsType();
-            this.penetratorLength = config.penetratorLength();
+            // Penetrator length is only needed (and only auto-detected) for orifice
+            this.penetratorLengthDetector = spsType == SpsType.ORIFICE ? new PenetratorLengthDetector() : null;
             this.savePointsToFile = config.savePointsToFile();
             this.clamp = config.clamp();
             this.pauseOnStarving = config.pauseOnStarving();
@@ -135,9 +137,37 @@ public class HspParameterProcessor implements ParameterProcessor
     @Override
     public void actOnValueChange(Float value)
     {
+        // In PENETRATOR mode the received value is the penetration amount itself (1 = fully inserted),
+        // so it only needs to be converted into a device position (1 = fully out).
+        addPositionPoint(1.f - value);
+    }
+
+    /**
+     * Handles the root and tip proximity of a penetrator that were received in the same OSC packet (VRChat sends
+     * both of them together, but a parameter that did not change is not sent at all, hence the nullable values).
+     * They are used to auto-detect the penetrator length, while the root proximity also drives the movement.
+     */
+    @Override
+    public void actOnProximityChange(Float rootProximity, Float tipProximity)
+    {
+        if (penetratorLengthDetector == null)
+        {
+            return; // Only orifice mode needs the penetrator length
+        }
+        penetratorLengthDetector.update(rootProximity, tipProximity);
+        if (rootProximity != null)
+        {
+            addPositionPoint(1.f - calculatePenetration(rootProximity));
+        }
+    }
+
+    /**
+     * @param floatPosition Position in 0-1 range where 1 = fully out and 0 = fully inserted.
+     */
+    private void addPositionPoint(float floatPosition)
+    {
         synchronized (hspPoints)
         {
-            float floatPosition = 1.f - calculatePenetration(value);
             int position = (int) (floatPosition * 100); // 100 = top, 0 = bottom (Handy API)
             int positionChange = Math.abs(position - lastPosition);
             if (minimalValueChange > positionChange)
@@ -152,15 +182,18 @@ public class HspParameterProcessor implements ParameterProcessor
     }
 
     /**
-     * @param value Value in 0-1 range (for penetrator, 1 = fully inserted and 0 = fully out).
+     * @param value Root proximity in 0-1 range (1 = fully inserted and 0 = fully out).
      * @return Penetration amount in 0-1 range (1 = fully inserted).
-     * For penetrator, it returns the value as is. For orifice, it calculates penetration based on exposed length and penetrator length.
+     * Calculated from the exposed length and the auto-detected penetrator length. Until the length is detected
+     * it returns 0, so that the device stays in place instead of moving based on a wrong length.
      */
     private Float calculatePenetration(Float value)
     {
-        if (spsType == SpsType.PENETRATOR)
+        Float penetratorLength = penetratorLengthDetector.getLength();
+        if (penetratorLength == null)
         {
-            return value;
+            // Penetrator length is not known yet (root and tip proximity were not received together yet)
+            return 0.f;
         }
         float exposedLength = 1.f - value;
         float exposedRatio = exposedLength / penetratorLength;

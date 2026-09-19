@@ -9,6 +9,7 @@ import org.example.handy.common.HandyClient;
 import org.example.handy.v3.HandyClientV3;
 import org.example.processor.HspParameterProcessor;
 import org.example.processor.ParameterProcessor;
+import org.example.processor.SpsType;
 
 import javax.swing.*;
 import java.awt.*;
@@ -17,6 +18,8 @@ import java.awt.event.ComponentEvent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Consumer;
 
 @Slf4j
 public class Main
@@ -46,15 +49,50 @@ public class Main
         if (config.testMode())
         {
             log.info("Running in test mode - generating fake data instead of listening for OSC");
-            TestDataSource testDataSource = new TestDataSource(processor::actOnValueChange);
+            TestDataSource testDataSource = new TestDataSource(testValueConsumer(config, processor));
             testDataSource.start();
         }
         else
         {
-            OscListener OSC = initOsc(config);
-            OSC.registerListener(config.avatarParameter(), processor::actOnValueChange);
+            OscListener osc = initOsc(config);
+            registerParameterListeners(osc, config, processor);
         }
         processor.run();
+    }
+
+    /**
+     * Registers listeners for the avatar parameters that drive the app. VRChat sends the root and the tip proximity
+     * of a penetrator in the same OSC packet, so in ORIFICE mode both are passed to the processor together.
+     */
+    private static void registerParameterListeners(OscListener osc, ConfigProperties config, ParameterProcessor processor)
+    {
+        String rootParameter = config.avatarParameter();
+        if (config.spsType() == SpsType.PENETRATOR)
+        {
+            osc.registerPacketListener(List.of(rootParameter), values -> processor.actOnValueChange(values.get(rootParameter)));
+            return;
+        }
+        String tipParameter = config.penetratorTipParameter();
+        osc.registerPacketListener(List.of(rootParameter, tipParameter),
+                values -> processor.actOnProximityChange(values.get(rootParameter), values.get(tipParameter)));
+    }
+
+    /**
+     * Test mode generates a 0-1 sawtooth. In PENETRATOR mode it is the fake penetration amount, while in ORIFICE mode
+     * it is the fake insertion amount, which is converted into the root/tip proximity pair of a simulated penetrator
+     * so that the length auto-detection is exercised as well.
+     */
+    private static Consumer<Float> testValueConsumer(ConfigProperties config, ParameterProcessor processor)
+    {
+        if (config.spsType() == SpsType.PENETRATOR)
+        {
+            return processor::actOnValueChange;
+        }
+        return insertionAmount ->
+        {
+            float rootProximity = 1.f - (1.f - insertionAmount) * TestDataSource.SIMULATED_PENETRATOR_LENGTH;
+            processor.actOnProximityChange(rootProximity, rootProximity + TestDataSource.SIMULATED_PENETRATOR_LENGTH);
+        };
     }
 
     private static JLabel setupGui()

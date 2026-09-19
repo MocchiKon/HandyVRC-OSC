@@ -5,6 +5,7 @@ target/
 dependency-reduced-pom.xml
 
 logs/*
+OscGoesBrrr-main/*
 example/*
 libsource/*
 TODO.md
