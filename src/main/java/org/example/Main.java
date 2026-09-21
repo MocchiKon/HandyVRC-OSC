@@ -11,6 +11,7 @@ import org.example.processor.HdspParameterProcessor;
 import org.example.processor.HspParameterProcessor;
 import org.example.processor.ParameterProcessor;
 import org.example.processor.SpsType;
+import org.example.update.StartupUpdateCheck;
 
 import javax.swing.*;
 import java.awt.*;
@@ -42,6 +43,8 @@ public class Main
         JLabel penetrationValueLabel = setupGui();
         var configLoader = new ConfigLoader(getAppConfigPath());
         ConfigProperties config = configLoader.readOrInitConfig();
+
+        StartupUpdateCheck.runIfEnabled(config); // Runs in the background, so it never delays the startup
 
         HandyClient handyClient = initHandyClient(config);
         ParameterProcessor processor = initProcessor(handyClient, config);

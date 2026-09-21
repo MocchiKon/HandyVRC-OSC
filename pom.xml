@@ -92,6 +92,28 @@
             </extension>
         </extensions>
 
+        <!--
+            version.properties carries the project version into the application so that the update check can compare it
+            with the newest GitHub release. Only that file is filtered: app.properties has to stay untouched because it
+            is copied to the user directory as the editable config template.
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>version.properties</exclude>
+                </excludes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>version.properties</include>
+                </includes>
+            </resource>
+        </resources>
+
         <plugins>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -121,6 +143,10 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>org.example.Main</mainClass>
+                                    <!-- Fallback for the update check when version.properties is not readable -->
+                                    <manifestEntries>
+                                        <Implementation-Version>${project.version}</Implementation-Version>
+                                    </manifestEntries>
                                 </transformer>
                             </transformers>
                         </configuration>

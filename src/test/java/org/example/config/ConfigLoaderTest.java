@@ -85,6 +85,32 @@ class ConfigLoaderTest
     }
 
     @Test
+    void checksForUpdatesByDefault() throws IOException
+    {
+        // an app.properties written by an older version has no checkForUpdates property, the check must still run
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                """);
+
+        assertThat(config.checkForUpdates()).isTrue();
+    }
+
+    @Test
+    void updateCheckCanBeDisabledByProperty() throws IOException
+    {
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                checkForUpdates=false
+                """);
+
+        assertThat(config.checkForUpdates()).isFalse();
+    }
+
+    @Test
     void hspIsTheDefaultAlgorithm()
     {
         assertThat(ConfigLoader.validateConnectionMode(ParameterProcessorType.HSP, ConnectionMode.API)).isNull();
