@@ -98,6 +98,7 @@ public class ConfigLoader
         boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
         boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
         boolean hdspTiming = Boolean.parseBoolean(getPropertyOrDefault(properties, "hdspTiming", "false"));
+        boolean useOscQuery = Boolean.parseBoolean(getPropertyOrDefault(properties, "useOscQuery", "true"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
 
@@ -126,6 +127,7 @@ public class ConfigLoader
                 .pauseOnStarving(pauseOnStarving)
                 .hdspTiming(hdspTiming)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
+                .useOscQuery(useOscQuery)
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
                 .processingAlgorithm(processingAlgorithm)
                 .avatarParameter(avatarParameter)

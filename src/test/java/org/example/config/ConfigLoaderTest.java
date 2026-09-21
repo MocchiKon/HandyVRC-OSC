@@ -126,6 +126,34 @@ class ConfigLoaderTest
                 .contains("Bluetooth");
     }
 
+    @Test
+    void usesOscQueryByDefault() throws IOException
+    {
+        // an app.properties written by an older version has no useOscQuery property, OSCQuery must still be used
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                """);
+
+        assertThat(config.useOscQuery()).isTrue();
+    }
+
+    @Test
+    void oscQueryCanBeDisabledToListenOnTheConfiguredPortOnly() throws IOException
+    {
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                listenOnPort=9123
+                useOscQuery=false
+                """);
+
+        assertThat(config.useOscQuery()).isFalse();
+        assertThat(config.listenOnPort()).isEqualTo(9123);
+    }
+
     private ConfigProperties loadConfig(String configContent) throws IOException
     {
         Path configPath = Files.createTempFile("app", ".properties");

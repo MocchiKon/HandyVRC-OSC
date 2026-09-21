@@ -20,6 +20,7 @@ public record ConfigProperties(
         boolean hdspTiming,
         int handyApiVersion,
         int listenOnPort,
+        boolean useOscQuery,
         boolean waitForApiResponse,
         Integer pointsOffset,
         int sendMessageEveryMs,
@@ -51,6 +52,7 @@ public record ConfigProperties(
                 ", hdspTiming=" + hdspTiming +
                 ", handyApiVersion=" + handyApiVersion +
                 ", listenOnPort=" + listenOnPort +
+                ", useOscQuery=" + useOscQuery +
                 ", waitForApiResponse=" + waitForApiResponse +
                 ", pointsOffset=" + pointsOffset +
                 ", sendMessageEveryMs=" + sendMessageEveryMs +
