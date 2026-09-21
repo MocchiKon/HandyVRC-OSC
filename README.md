@@ -23,6 +23,27 @@ Then run the app by double-clicking "start.bat" file. GUI only displays current 
 * `HDSP` (Handy Direct Streaming Protocol) streams the newest position directly without device-side buffering and works with `BLUETOOTH` only.
   When `hdspTiming=true` it also measures the message delay and its jitter and schedules commands so that a move in progress is not interrupted.
 
+## OSCQuery
+By default (`useOscQuery=true`) the app announces itself to VRChat over OSCQuery (mDNS + a small local HTTP server)
+and lets VRChat send OSC messages to a free port it picks on startup. Because VRChat is told where to send messages,
+the app keeps working when another application already listens on the OSC port from `listenOnPort` (port collision),
+and several OSC apps can run at the same time.
+* Requires OSC enabled in VRChat and VRChat 2023.3.1 or newer.
+* Only on the first start after the change: if VRChat does not send anything, restart VRChat (it caches OSC
+  destinations in `%USERPROFILE%\AppData\LocalLow\VRChat\VRChat\OSC\`; deleting that folder or using the
+  "Reset Config" option in the radial menu clears the cache).
+* Set `useOscQuery=false` to go back to plain port listening on `listenOnPort` (needed only for old VRChat
+  versions or when mDNS is blocked in your network).
+* OSCQuery does not change how messages are received or processed - the OSC listener and the processing/sending
+  loop stay exactly the same, so the parameter update rate is unaffected. The OSCQuery HTTP server, the mDNS
+  announcements and the parameter scan below all run on separate background threads.
+
+On startup the app also reads the avatar parameters VRChat exposes through OSCQuery and logs all penetrator/orifice
+candidates it finds (for example all `PenOthersNewRoot`/`PenOthersNewTip` pairs and all `PenOthers` parameters),
+together with a check whether the configured `avatarParameter` and `penetratorTipParameter` match one of them. This
+is only a validation aid - look for `SPS parameter candidates reported by VRChat OSCQuery` in the console/log file
+when the app does not react to your avatar.
+
 On startup the app also checks in the background whether a newer version was released on
 [GitHub](https://github.com/MocchiKon/HandyVRC-OSC/releases) and shows a notification when there is one.
 The check is best effort - no internet connection, GitHub being unavailable or the repository being gone never blocks
@@ -45,7 +66,8 @@ or breaks the app - and it can be turned off with `checkForUpdates=false` in app
 ## TODO
 Hopefully I will have time and will to implement these one day (probably not as long as I don't need these in my use-case):
 - [x] Auto update checking
-- [ ] Penetration multiplier (for better blowjobs in PENETRATOR mode)
+- [x] OSCQuery (no more port collisions with other OSC apps)
+- [ ] Penetration multiplier
 - [x] Penetrator length auto-detection
 - [ ] Default delay calculation
 - [x] Bluetooth

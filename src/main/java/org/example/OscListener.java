@@ -2,14 +2,12 @@ package org.example;
 
 import com.illposed.osc.*;
 import com.illposed.osc.argument.OSCTimeTag64;
-import com.illposed.osc.messageselector.OSCPatternAddressMessageSelector;
 import com.illposed.osc.transport.OSCPortIn;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,11 +45,7 @@ public class OscListener
      */
     public void registerPacketListener(List<String> addressPatterns, Consumer<Map<String, Float>> valuesConsumer)
     {
-        List<AddressPattern> patterns = new ArrayList<>(addressPatterns.size());
-        for (String addressPattern : addressPatterns)
-        {
-            patterns.add(new AddressPattern(addressPattern, new OSCPatternAddressMessageSelector(addressPattern)));
-        }
+        List<OscAddressPattern> patterns = addressPatterns.stream().map(OscAddressPattern::new).toList();
         oscListener.addPacketListener(new PacketListener(patterns, valuesConsumer));
     }
 
@@ -61,15 +55,10 @@ public class OscListener
         oscListener.stopListening();
     }
 
-    /** OSC address pattern (as configured) together with a matcher for it. */
-    private record AddressPattern(String address, OSCPatternAddressMessageSelector selector)
-    {
-    }
-
     @RequiredArgsConstructor
     private static class PacketListener implements OSCPacketListener
     {
-        private final List<AddressPattern> patterns;
+        private final List<OscAddressPattern> patterns;
         private final Consumer<Map<String, Float>> valuesConsumer;
 
         @Override
@@ -113,16 +102,16 @@ public class OscListener
                 return;
             }
             OSCMessageEvent messageEvent = new OSCMessageEvent(this, OSCTimeTag64.IMMEDIATE, message);
-            for (AddressPattern pattern : patterns)
+            for (OscAddressPattern pattern : patterns)
             {
-                if (!pattern.selector().matches(messageEvent))
+                if (!pattern.matches(messageEvent))
                 {
                     continue;
                 }
                 Float value = getFirstArgumentAsFloat(message);
                 if (value != null)
                 {
-                    values.put(pattern.address(), value);
+                    values.put(pattern.pattern(), value);
                 }
             }
         }

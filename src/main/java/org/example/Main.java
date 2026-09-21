@@ -7,6 +7,8 @@ import org.example.handy.ble.HandyBleAdapter;
 import org.example.handy.ble.HandyClientBle;
 import org.example.handy.common.HandyClient;
 import org.example.handy.v3.HandyClientV3;
+import org.example.oscquery.OscQueryService;
+import org.example.oscquery.VrchatParameterScanner;
 import org.example.processor.HdspParameterProcessor;
 import org.example.processor.HspParameterProcessor;
 import org.example.processor.ParameterProcessor;
@@ -203,15 +205,59 @@ public class Main
 
     private static OscListener initOsc(ConfigProperties config) throws IOException
     {
+        if (!config.useOscQuery())
+        {
+            log.info("OSCQuery is disabled, using simple port listening on port {}", config.listenOnPort());
+            return new OscListener(config.listenOnPort());
+        }
         try
         {
-            return new OscListener(config.listenOnPort());
+            return initOscWithOscQuery(config);
         }
         catch (IOException e)
         {
-            log.error("Could not initialize OSC Listener!", e);
-            throw e;
+            log.error("Could not start OSCQuery ({}), falling back to simple port listening on port {}. VRChat will"
+                    + " only reach this app on that port if no other application uses it.", e.getMessage(),
+                    config.listenOnPort());
+            return new OscListener(config.listenOnPort());
         }
+    }
+
+    /**
+     * Binds the OSC listener to a free port and lets VRChat know about it through OSCQuery. Because VRChat is told
+     * where to send messages, this keeps working when another application already listens on 'listenOnPort'.
+     */
+    private static OscListener initOscWithOscQuery(ConfigProperties config) throws IOException
+    {
+        IOException lastError = null;
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            int port = OscQueryService.findFreePort();
+            OscListener oscListener;
+            try
+            {
+                oscListener = new OscListener(port);
+            }
+            catch (IOException e)
+            {
+                lastError = e; // The port was taken in the meantime, try another one
+                continue;
+            }
+            try
+            {
+                OscQueryService oscQueryService = OscQueryService.start(port);
+                VrchatParameterScanner.start(oscQueryService::addDiscoveryListener, config);
+                log.info("OSCQuery is enabled: VRChat will send OSC messages to port {} (port {} from app.properties is"
+                        + " ignored while OSCQuery is used)", port, config.listenOnPort());
+                return oscListener;
+            }
+            catch (IOException e)
+            {
+                lastError = e;
+                oscListener.close();
+            }
+        }
+        throw new IOException("Could not open a free OSC port and announce it through OSCQuery", lastError);
     }
 
     public static void delayedClosingWithLog(String msg)
