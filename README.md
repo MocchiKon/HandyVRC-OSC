@@ -23,6 +23,11 @@ Then run the app by double-clicking "start.bat" file. GUI only displays current 
 * `HDSP` (Handy Direct Streaming Protocol) streams the newest position directly without device-side buffering and works with `BLUETOOTH` only.
   When `hdspTiming=true` it also measures the message delay and its jitter and schedules commands so that a move in progress is not interrupted.
 
+On startup the app also checks in the background whether a newer version was released on
+[GitHub](https://github.com/MocchiKon/HandyVRC-OSC/releases) and shows a notification when there is one.
+The check is best effort - no internet connection, GitHub being unavailable or the repository being gone never blocks
+or breaks the app - and it can be turned off with `checkForUpdates=false` in app.properties.
+
 <b>IMPORTANT INFORMATION:</b>
 1. It's highly recommended to run this app on the remote user side as this will allow for perfect synchronization
    (by matching `pointsOffset` value to the delay between remote user action and you seeing it on your display).<br/>
@@ -39,7 +44,7 @@ Then run the app by double-clicking "start.bat" file. GUI only displays current 
 
 ## TODO
 Hopefully I will have time and will to implement these one day (probably not as long as I don't need these in my use-case):
-- [ ] Auto update checking
+- [x] Auto update checking
 - [ ] Penetration multiplier (for better blowjobs in PENETRATOR mode)
 - [x] Penetrator length auto-detection
 - [ ] Default delay calculation

@@ -93,6 +93,7 @@ public class ConfigLoader
             delayedClosingWithLog(algorithmConnectionError);
         }
         boolean testMode = Boolean.parseBoolean(getPropertyOrDefault(properties, "testMode", "false"));
+        boolean checkForUpdates = Boolean.parseBoolean(getPropertyOrDefault(properties, "checkForUpdates", "true"));
         boolean savePointsToFile = Boolean.parseBoolean(getPropertyOrDefault(properties, "savePointsToFile", "false"));
         boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
         boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
@@ -119,6 +120,7 @@ public class ConfigLoader
         var config = ConfigProperties.builder()
                 .connectionMode(connectionMode)
                 .testMode(testMode)
+                .checkForUpdates(checkForUpdates)
                 .savePointsToFile(savePointsToFile)
                 .clamp(clamp)
                 .pauseOnStarving(pauseOnStarving)

@@ -13,6 +13,7 @@ public record ConfigProperties(
         ParameterProcessorType processingAlgorithm,
         ConnectionMode connectionMode,
         boolean testMode,
+        boolean checkForUpdates,
         boolean savePointsToFile,
         boolean clamp,
         boolean pauseOnStarving,
@@ -43,6 +44,7 @@ public record ConfigProperties(
                 ", processingAlgorithm=" + processingAlgorithm +
                 ", connectionMode=" + connectionMode +
                 ", testMode=" + testMode +
+                ", checkForUpdates=" + checkForUpdates +
                 ", savePointsToFile=" + savePointsToFile +
                 ", clamp=" + clamp +
                 ", pauseOnStarving=" + pauseOnStarving +
