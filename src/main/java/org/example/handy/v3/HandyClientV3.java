@@ -1,58 +1,44 @@
 package org.example.handy.v3;
 
 import handy.api.HspApi;
-import handy.api.InfoApi;
-import handy.api.SliderApi;
-import handy.api.UtilsApi;
-import handy.invoker.ApiClient;
 import handy.model.*;
 import handy.model.HspState;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.example.handy.common.HandyBaseResponseWithError;
-import org.example.handy.common.HandyClient;
-import org.example.handy.common.HandyError;
+import org.example.handy.common.*;
 import org.example.handy.common.dto.*;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 
 // Firmware 4.x only
 @Slf4j
 public class HandyClientV3 extends HandyClient
 {
     private final String deviceConnectionKey;
-    private final String applicationId;
-    private volatile HspApi hspApi;
-    private volatile InfoApi infoApi;
-    private volatile SliderApi sliderApi;
-    private volatile UtilsApi utilsApi;
-    private final AtomicInteger requestCount = new AtomicInteger(0);
+    private final HandyApiClients apiClients;
+    /** Streaming produces one check per batch, so repeating problems are summarized instead of logged per batch. */
+    private final RateLimitedLogger hspAddWarnings = new RateLimitedLogger(log);
 
     public HandyClientV3(String deviceConnectionKey, String applicationId)
     {
         this.deviceConnectionKey = deviceConnectionKey;
-        this.applicationId = applicationId;
-        rebuildApiClients();
+        this.apiClients = new HandyApiClients(applicationId);
     }
 
-    private synchronized void rebuildApiClients()
+    // Tests only: talks to the given HSP API implementation instead of the real one
+    HandyClientV3(HspApi hspApi)
     {
-        ApiClient authenticatedClient = newAuthenticatedApiClient();
-        this.hspApi = new HspApi(authenticatedClient);
-        this.infoApi = new InfoApi(authenticatedClient);
-        this.sliderApi = new SliderApi(authenticatedClient);
-        this.utilsApi = new UtilsApi(authenticatedClient);
+        this.deviceConnectionKey = null;
+        this.apiClients = new HandyApiClients(new HandyApiClients.Clients(hspApi, null, null, null));
     }
 
-    private ApiClient newAuthenticatedApiClient()
+    @Override
+    public void close()
     {
-        var client = new ApiClient();
-        HandyApiClientAuth.applyApiKey(client, applicationId);
-        return client;
+        apiClients.close();
     }
 
     @SneakyThrows
@@ -61,7 +47,7 @@ public class HandyClientV3 extends HandyClient
     {
         var setModeRequest = new SetModeRequest();
         setModeRequest.setMode(mode);
-        var response = infoApi.setMode2(deviceConnectionKey, setModeRequest, null);
+        var response = apiClients.call("changeMode", clients -> clients.infoApi().setMode2(deviceConnectionKey, setModeRequest, null));
         return new HandyBaseResponseWithError(toHandyError(response.getError()));
     }
 
@@ -76,7 +62,7 @@ public class HandyClientV3 extends HandyClient
         playRequest.setPauseOnStarving(pauseOnStarving);
         playRequest.setLoop(false);
         log.info("Starting HSP stream ({})", playRequest);
-        var response = hspApi.hspPlay(deviceConnectionKey, playRequest, null);
+        var response = apiClients.call("hspPlay", clients -> clients.hspApi().hspPlay(deviceConnectionKey, playRequest, null));
         log.info("Started HSP stream (response=[{}])", response);
         return new HandyBaseResponseWithError(toHandyError(response.getError()));
     }
@@ -87,7 +73,7 @@ public class HandyClientV3 extends HandyClient
     {
         var hspAdd = new HspAdd();
         List<Point> points = new ArrayList<>(requestBody.points().size());
-        for (HspPoint point : requestBody.points())
+        for (MovementPoint point : requestBody.points())
         {
             var apiPoint = new Point();
             apiPoint.setT(point.t());
@@ -98,15 +84,25 @@ public class HandyClientV3 extends HandyClient
         hspAdd.setFlush(requestBody.flush());
 
         log.trace("Sending points to HSP stream ({})", hspAdd);
-        var response = hspApi.hspAdd(deviceConnectionKey, hspAdd, null);
-        attemptRefreshingApiClients();
-        var handyHspAddResponse = new HandyHspAddResponse(toHandyError(response.getError()), toHspState(response.getResult()));
+        // A connection that the server closed in the meantime is not an error the caller has to handle: the batch
+        // is simply sent again on a new connection (the points still carry their original timestamps).
+        var response = apiClients.call("hspAdd", clients -> clients.hspApi().hspAdd(deviceConnectionKey, hspAdd, null));
         log.trace("Sent points to HSP stream (response={})", response);
-        if (handyHspAddResponse.error() == null && handyHspAddResponse.result() == null)
+
+        HandyError deviceError = toHandyError(response.getError());
+        org.example.handy.common.dto.HspState state = toHspState(response.getResult());
+        if (deviceError != null)
         {
-            log.error("Recieved potentially empty response ({})", response);
+            // The device rejected the batch, so the state it returned (usually empty) is not worth checking
+            return new HandyHspAddResponse(deviceError, state);
         }
-        return handyHspAddResponse;
+
+        // The server answers an accepted batch with the resulting device state, which is checked against the sent
+        // points exactly like in Bluetooth mode: skipped points, a starving or stopped stream, a saturated buffer.
+        HspAddCheck check = HspAddResponseChecker.check(requestBody.points(), state);
+        check.warnings().forEach(hspAddWarnings::warn);
+        log.trace("[HSP] Response check: {}", check);
+        return new HandyHspAddResponse(check.error(), state);
     }
 
     @SneakyThrows
@@ -116,7 +112,7 @@ public class HandyClientV3 extends HandyClient
         var setupRequest = new HspSetupRequest();
         setupRequest.setStreamId(1);
         log.info("Initializing HSP stream with id 1");
-        var response = hspApi.hspSetup(deviceConnectionKey, null, setupRequest);
+        var response = apiClients.call("hspSetup", clients -> clients.hspApi().hspSetup(deviceConnectionKey, null, setupRequest));
         // NOTE: current_time - ms since device boot
         log.info("Initialized HSP stream with id 1 ({})", response);
         return toSetupResponse(response);
@@ -126,7 +122,7 @@ public class HandyClientV3 extends HandyClient
     @Override
     public HandyBaseResponseWithError hspFlush()
     {
-        var response = hspApi.hspFlush(deviceConnectionKey, null);
+        var response = apiClients.call("hspFlush", clients -> clients.hspApi().hspFlush(deviceConnectionKey, null));
         return new HandyBaseResponseWithError(toHandyError(response.getError()));
     }
 
@@ -134,7 +130,7 @@ public class HandyClientV3 extends HandyClient
     @Override
     public boolean checkConnectionStatus()
     {
-        var response = infoApi.isConnected(deviceConnectionKey, null);
+        var response = apiClients.call("checkConnectionStatus", clients -> clients.infoApi().isConnected(deviceConnectionKey, null));
         if (response.getResult() == null)
         {
             log.error("Error when checking connection to Handy! (reason: {})", response);
@@ -147,7 +143,7 @@ public class HandyClientV3 extends HandyClient
     @Override
     public Optional<SliderSettingsResult> getSliderSettings()
     {
-        var response = sliderApi.getStroke(deviceConnectionKey, null);
+        var response = apiClients.call("getSliderSettings", clients -> clients.sliderApi().getStroke(deviceConnectionKey, null));
         if (response.getResult() == null)
         {
             log.error("Error when checking slider settings! (reason: {})", response);
@@ -169,7 +165,7 @@ public class HandyClientV3 extends HandyClient
         BigDecimal resolvedMax = max != null ? BigDecimal.valueOf(max.doubleValue()) : null;
         if (resolvedMin == null || resolvedMax == null)
         {
-            var current = sliderApi.getStroke(deviceConnectionKey, null);
+            var current = apiClients.call("getSliderSettings", clients -> clients.sliderApi().getStroke(deviceConnectionKey, null));
             if (current.getResult() == null)
             {
                 log.error("Error when reading slider settings before update! (reason: {})", current);
@@ -189,13 +185,17 @@ public class HandyClientV3 extends HandyClient
         strokeSettings.setMin(resolvedMin);
         strokeSettings.setMax(resolvedMax);
         log.info("Setting slider limits min={}, max={}...", resolvedMin, resolvedMax);
-        sliderApi.setStroke(deviceConnectionKey, strokeSettings, null);
+        apiClients.call("setSliderSettings", clients ->
+        {
+            clients.sliderApi().setStroke(deviceConnectionKey, strokeSettings, null);
+            return null;
+        });
     }
 
     @SneakyThrows
     public long getServerTime()
     {
-        var response = utilsApi.getServerTime();
+        var response = apiClients.call("getServerTime", clients -> clients.utilsApi().getServerTime());
         return response.getServerTime().longValue();
     }
 
@@ -204,19 +204,6 @@ public class HandyClientV3 extends HandyClient
     public void sendRequestForMessageDelayCalc()
     {
         getSliderSettings();
-    }
-
-    private boolean attemptRefreshingApiClients() // Prevent GOAWAY (every 94 requests on my machine)
-    {
-        int count = requestCount.incrementAndGet();
-        if (count >= 30)
-        {
-            requestCount.set(0);
-            rebuildApiClients();
-            log.trace("Refreshed API clients");
-            return true;
-        }
-        return false;
     }
 
     private HandyError toHandyError(DeviceError error)
@@ -239,7 +226,27 @@ public class HandyClientV3 extends HandyClient
         }
         return new org.example.handy.common.dto.HspState(state.getCurrentTime() != null ? state.getCurrentTime() : 0,
                 state.getFirstPointTime(),
-                state.getLastPointTime());
+                state.getLastPointTime(),
+                state.getPoints(),
+                state.getMaxPoints() != null ? state.getMaxPoints().intValue() : null,
+                state.getCurrentPoint(),
+                toHspPlayState(state.getPlayState()));
+    }
+
+    private org.example.handy.common.dto.HspPlayState toHspPlayState(handy.model.HspPlayState state)
+    {
+        if (state == null)
+        {
+            return null;
+        }
+        return switch (state)
+        {
+            case NOT_INITIALIZED -> org.example.handy.common.dto.HspPlayState.NOT_INITIALIZED;
+            case PLAYING -> org.example.handy.common.dto.HspPlayState.PLAYING;
+            case STOPPED -> org.example.handy.common.dto.HspPlayState.STOPPED;
+            case PAUSED -> org.example.handy.common.dto.HspPlayState.PAUSED;
+            case STARVING -> org.example.handy.common.dto.HspPlayState.STARVING;
+        };
     }
 
     private HandySetupResponse toSetupResponse(GetHsspState200Response response)

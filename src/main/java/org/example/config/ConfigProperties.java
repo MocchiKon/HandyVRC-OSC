@@ -16,6 +16,7 @@ public record ConfigProperties(
         boolean savePointsToFile,
         boolean clamp,
         boolean pauseOnStarving,
+        boolean hdspTiming,
         int handyApiVersion,
         int listenOnPort,
         boolean waitForApiResponse,
@@ -45,6 +46,7 @@ public record ConfigProperties(
                 ", savePointsToFile=" + savePointsToFile +
                 ", clamp=" + clamp +
                 ", pauseOnStarving=" + pauseOnStarving +
+                ", hdspTiming=" + hdspTiming +
                 ", handyApiVersion=" + handyApiVersion +
                 ", listenOnPort=" + listenOnPort +
                 ", waitForApiResponse=" + waitForApiResponse +

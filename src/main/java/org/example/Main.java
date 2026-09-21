@@ -7,6 +7,7 @@ import org.example.handy.ble.HandyBleAdapter;
 import org.example.handy.ble.HandyClientBle;
 import org.example.handy.common.HandyClient;
 import org.example.handy.v3.HandyClientV3;
+import org.example.processor.HdspParameterProcessor;
 import org.example.processor.HspParameterProcessor;
 import org.example.processor.ParameterProcessor;
 import org.example.processor.SpsType;
@@ -166,10 +167,16 @@ public class Main
 
         HandyBleAdapter ble = new HandyBleAdapter();
 
+        ble.connect();
+        log.info("Handy connected via BLE...");
+        HandyClientBle client = new HandyClientBle(ble);
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             log.info("Shutdown hook: disconnecting BLE...");
             try
             {
+                // Fails the requests that still wait for a response before the connection goes away
+                client.close();
                 ble.disconnect();
             }
             catch (Exception e)
@@ -179,9 +186,7 @@ public class Main
             log.info("BLE disconnected in shutdown hook.");
             }, "BLE-Shutdown-thread"));
 
-        ble.connect();
-        log.info("Handy connected via BLE...");
-        return new HandyClientBle(ble);
+        return client;
     }
 
     private static ParameterProcessor initProcessor(HandyClient handyClient, ConfigProperties config)
@@ -189,6 +194,7 @@ public class Main
         return switch (config.processingAlgorithm())
         {
             case HSP -> new HspParameterProcessor(handyClient, config);
+            case HDSP -> new HdspParameterProcessor(handyClient, config);
         };
     }
 

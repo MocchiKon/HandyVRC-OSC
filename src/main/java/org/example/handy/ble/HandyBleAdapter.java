@@ -11,8 +11,16 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * Thin BLE transport around the Handy peripheral: it writes request payloads and queues every notification
+ * (responses and device notifications alike) it receives.
+ * <p>
+ * The received messages are queued as-is and must be consumed by a single reader (see {@link HandyRpcClient}),
+ * which routes each message to the request that is waiting for it. Keeping the queue free of any demultiplexing
+ * logic here is what makes it impossible for one caller to consume (and thereby lose) another caller's response.
+ */
 @Slf4j
-public class HandyBleAdapter
+public class HandyBleAdapter implements RpcTransport
 {
     public static final String SERVICE_UUID = "77834d26-40f7-11ee-be56-0242ac120002";
     public static final String TX_UUID = "77835032-40f7-11ee-be56-0242ac120002";
@@ -22,7 +30,7 @@ public class HandyBleAdapter
     public static final BluetoothUUID TX_BLUETOOTH_UUID = new BluetoothUUID(TX_UUID);
     public static final BluetoothUUID RX_BLUETOOTH_UUID = new BluetoothUUID(RX_UUID);
 
-    private Peripheral handy;
+    private volatile Peripheral handy;
     private final BlockingQueue<byte[]> rxQueue = new LinkedBlockingQueue<>();
 
     public void connect()
@@ -64,9 +72,13 @@ public class HandyBleAdapter
         handy.connect();
 
         handy.notify(SERVICE_BLUETOOTH_UUID, RX_BLUETOOTH_UUID, e -> {
-            log.info("BLE device {} notified", handy.getIdentifier());
-            boolean result = rxQueue.offer(e);
-            log.info("BLE device {} result: {}", handy.getIdentifier(), result);
+            // Keep this callback cheap: it runs on the BLE stack's thread and every message the device sends
+            // (responses as well as notifications) goes through here.
+            rxQueue.offer(e);
+            if (log.isTraceEnabled())
+            {
+                log.trace("BLE message received ({} bytes, {} queued)", e.length, rxQueue.size());
+            }
         });
 
         log.info("Connected and subscribed to BLE notifications.");
@@ -84,20 +96,27 @@ public class HandyBleAdapter
                 .anyMatch(s -> s.uuid().equals(SERVICE_UUID));
     }
 
+    @Override
     public void write(byte[] payload)
     {
+        if (!isConnected())
+        {
+            throw new IllegalStateException("Handy is not connected over BLE, cannot write " + payload.length + " bytes");
+        }
         handy.writeCommand(SERVICE_BLUETOOTH_UUID, TX_BLUETOOTH_UUID, payload);
     }
 
     /**
-     * Waits for a notification response with timeout.
+     * Waits for the next message the device sends. Intended to be called by the single RPC reader thread only,
+     * because the first caller that polls wins the message.
      */
-    public byte[] waitForResponse(long timeoutMs) throws TimeoutException, InterruptedException
+    @Override
+    public byte[] readMessage(long timeoutMs) throws TimeoutException, InterruptedException
     {
         byte[] data = rxQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
         if (data == null)
         {
-            throw new TimeoutException("No BLE response received within " + timeoutMs + "ms");
+            throw new TimeoutException("No BLE message received within " + timeoutMs + "ms");
         }
         return data;
     }
