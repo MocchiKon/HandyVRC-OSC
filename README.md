@@ -18,6 +18,11 @@ Before using this app you need to fill few values in app.properties file
 Every property is explained in the properties file.<br/>
 Then run the app by double-clicking "start.bat" file. GUI only displays current TheHandy position (100 = top, 0 = bottom), all other information is printed to the console and log files.
 
+`processingAlgorithm` (in app.properties) selects how points are delivered to the device:
+* `HSP` (default) buffers timestamped points on the device and works with both `API` and `BLUETOOTH` connection modes.
+* `HDSP` (Handy Direct Streaming Protocol) streams the newest position directly without device-side buffering and works with `BLUETOOTH` only.
+  When `hdspTiming=true` it also measures the message delay and its jitter and schedules commands so that a move in progress is not interrupted.
+
 <b>IMPORTANT INFORMATION:</b>
 1. It's highly recommended to run this app on the remote user side as this will allow for perfect synchronization
    (by matching `pointsOffset` value to the delay between remote user action and you seeing it on your display).<br/>

@@ -70,7 +70,7 @@ public class ConfigLoader
         setLoggingLevel(logLevel);
 
         String processingAlgorithmProperty = getPropertyOrDefault(properties, "processingAlgorithm", "HSP");
-        var processingAlgorithm = EnumUtils.getEnum(ParameterProcessorType.class, processingAlgorithmProperty);
+        var processingAlgorithm = EnumUtils.getEnum(ParameterProcessorType.class, processingAlgorithmProperty.toUpperCase());
         if (processingAlgorithm == null)
         {
             delayedClosingWithLog("No '%s' algorithm available! Check your config file, closing app...".formatted(processingAlgorithmProperty));
@@ -87,10 +87,16 @@ public class ConfigLoader
             log.warn("Unknown connectionMode '{}', defaulting to API", connectionModeStr);
             connectionMode = ConnectionMode.API;
         }
+        String algorithmConnectionError = validateConnectionMode(processingAlgorithm, connectionMode);
+        if (algorithmConnectionError != null)
+        {
+            delayedClosingWithLog(algorithmConnectionError);
+        }
         boolean testMode = Boolean.parseBoolean(getPropertyOrDefault(properties, "testMode", "false"));
         boolean savePointsToFile = Boolean.parseBoolean(getPropertyOrDefault(properties, "savePointsToFile", "false"));
         boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
         boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
+        boolean hdspTiming = Boolean.parseBoolean(getPropertyOrDefault(properties, "hdspTiming", "false"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
 
@@ -116,6 +122,7 @@ public class ConfigLoader
                 .savePointsToFile(savePointsToFile)
                 .clamp(clamp)
                 .pauseOnStarving(pauseOnStarving)
+                .hdspTiming(hdspTiming)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
                 .processingAlgorithm(processingAlgorithm)
@@ -132,6 +139,23 @@ public class ConfigLoader
                 .build();
         log.info("Loaded config: {}", config.toLoggableString());
         return config;
+    }
+
+    /**
+     * HDSP is a direct streaming protocol without device-side buffering, so it only works over a low latency
+     * Bluetooth connection. HSP keeps working over both API and Bluetooth.
+     *
+     * @return an error message when the selected algorithm cannot be used with the selected connection mode,
+     * or null when the combination is valid
+     */
+    static String validateConnectionMode(ParameterProcessorType processingAlgorithm, ConnectionMode connectionMode)
+    {
+        if (processingAlgorithm == ParameterProcessorType.HDSP && connectionMode != ConnectionMode.BLUETOOTH)
+        {
+            return ("Processing algorithm HDSP is only supported with Bluetooth! Set connectionMode=BLUETOOTH "
+                    + "or use processingAlgorithm=HSP (default). Closing app...");
+        }
+        return null;
     }
 
     /**

@@ -1,87 +1,69 @@
 package org.example.processor;
 
 import handy.model.DeviceModeValue;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
+import org.example.handy.common.ConnectionRetry;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
+import org.example.handy.common.RateLimitedLogger;
 import org.example.handy.common.dto.*;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.util.*;
-import java.util.function.Consumer;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.example.Main.delayedClosingWithLog;
 
 @Slf4j
-public class HspParameterProcessor implements ParameterProcessor
+public class HspParameterProcessor extends AbstractStreamingParameterProcessor
 {
     public static final int HSP_POINTS_PER_MSG_LIMIT = 100;
-    private final long INIT_TIME_MS;
-    private final List<HspPoint> hspPoints = Collections.synchronizedList(new ArrayList<>(20));
-    private final HandyClient handyClient;
 
-    private int lastPosition = 100;
+    private boolean pauseOnStarving;
 
-    private int timeOffsetMs;
-    private int timeBetweenMessages; // Difference between TIME_OFFSET_MS and this should account for delay to reach handy so that 1st point gets played
-    private int minimalValueChange;
-    private SpsType spsType;
-    /** Used to auto-detect the penetrator length. Null unless spsType is ORIFICE. */
-    private PenetratorLengthDetector penetratorLengthDetector;
-
-    private Consumer<Integer> onValueChange;
-
-    // Recording points
-    private boolean savePointsToFile;
-    private Integer firstRecordedPointTime;
-    private final static String HSP_POINTS_FILE_NAME = "handy_points-%s.csv".formatted(UUID.randomUUID());
+    /** Repeated stream failures are summarized instead of logging one error per sent batch. */
+    private final RateLimitedLogger hspAddErrors = new RateLimitedLogger(log);
 
     // clamp points
     private boolean clamp;
     private Integer lastX = null;
     private int lastDir = 0;
 
-    private boolean pauseOnStarving;
-
     // Tests only
     HspParameterProcessor(ConfigProperties config)
     {
-        this.INIT_TIME_MS = System.currentTimeMillis();
-        this.handyClient = null;
-        setupProperties(config);
+        super(null, config);
+        setupHspProperties(config);
         this.timeOffsetMs = config.pointsOffset() != null ? config.pointsOffset() : 0;
     }
 
     public HspParameterProcessor(HandyClient handyClient, ConfigProperties config)
     {
-        this.handyClient = handyClient;
-        setupProperties(config);
+        super(handyClient, config);
+        setupHspProperties(config);
 
-        HandyBaseResponseWithError response = this.handyClient.changeMode(DeviceModeValue.HSP);
+        HandyBaseResponseWithError response = handyClient.changeMode(DeviceModeValue.HSP);
         if (response.error() != null)
         {
             delayedClosingWithLog("Could not change Handy mode to HSP (reason: %s). Closing app...".formatted(response.error().message()));
         }
-        HandySetupResponse setupResponse = this.handyClient.hspSetup();
+        HandySetupResponse setupResponse = handyClient.hspSetup();
         if (setupResponse.error() != null)
         {
             delayedClosingWithLog("Could not setup HSP stream (reason: %s). Closing app...".formatted(setupResponse.error().message()));
         }
-        HandyBaseResponseWithError flushResponse = this.handyClient.hspFlush();
+        HandyBaseResponseWithError flushResponse = handyClient.hspFlush();
         if (flushResponse.error() != null)
         {
             delayedClosingWithLog("Could not flush HSP stream (reason: %s). Closing app...".formatted(flushResponse.error().message()));
         }
 
         this.timeOffsetMs = resolvePointsOffset(config);
-        this.INIT_TIME_MS = System.currentTimeMillis();
-        HandyBaseResponseWithError playResponse = this.handyClient.hspPlay(0, 0, pauseOnStarving);
+        this.initTimeMs = System.currentTimeMillis();
+        HandyBaseResponseWithError playResponse = handyClient.hspPlay(0, 0, pauseOnStarving);
         if (playResponse.error() != null)
         {
             delayedClosingWithLog("Could not play HSP stream (reason: %s). Closing app...".formatted(playResponse.error().message()));
@@ -89,31 +71,16 @@ public class HspParameterProcessor implements ParameterProcessor
 
         if (config.sliderMin() != null || config.sliderMax() != null)
         {
-            this.handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+            handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
         }
-        Optional<SliderSettingsResult> sliderSettings = this.handyClient.getSliderSettings();
+        Optional<SliderSettingsResult> sliderSettings = handyClient.getSliderSettings();
         sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
     }
 
-    private void setupProperties(ConfigProperties config)
+    private void setupHspProperties(ConfigProperties config)
     {
-        synchronized (hspPoints)
-        {
-            this.timeBetweenMessages = config.sendMessageEveryMs();
-            this.minimalValueChange = config.minimalValueChange();
-            this.spsType = config.spsType();
-            // Penetrator length is only needed (and only auto-detected) for orifice
-            this.penetratorLengthDetector = spsType == SpsType.ORIFICE ? new PenetratorLengthDetector() : null;
-            this.savePointsToFile = config.savePointsToFile();
-            this.clamp = config.clamp();
-            this.pauseOnStarving = config.pauseOnStarving();
-        }
-    }
-
-    @Override
-    public void setValueChangeListener(Consumer<Integer> onValueChange)
-    {
-        this.onValueChange = onValueChange;
+        this.pauseOnStarving = config.pauseOnStarving();
+        this.clamp = config.clamp();
     }
 
     /**
@@ -135,159 +102,22 @@ public class HspParameterProcessor implements ParameterProcessor
     }
 
     @Override
-    public void actOnValueChange(Float value)
+    protected long trySendingMessage(long lastMessageSentMs)
     {
-        // In PENETRATOR mode the received value is the penetration amount itself (1 = fully inserted),
-        // so it only needs to be converted into a device position (1 = fully out).
-        addPositionPoint(1.f - value);
-    }
-
-    /**
-     * Handles the root and tip proximity of a penetrator that were received in the same OSC packet (VRChat sends
-     * both of them together, but a parameter that did not change is not sent at all, hence the nullable values).
-     * They are used to auto-detect the penetrator length, while the root proximity also drives the movement.
-     */
-    @Override
-    public void actOnProximityChange(Float rootProximity, Float tipProximity)
-    {
-        if (penetratorLengthDetector == null)
-        {
-            return; // Only orifice mode needs the penetrator length
-        }
-        penetratorLengthDetector.update(rootProximity, tipProximity);
-        if (rootProximity != null)
-        {
-            addPositionPoint(1.f - calculatePenetration(rootProximity));
-        }
-    }
-
-    /**
-     * @param floatPosition Position in 0-1 range where 1 = fully out and 0 = fully inserted.
-     */
-    private void addPositionPoint(float floatPosition)
-    {
-        synchronized (hspPoints)
-        {
-            int position = (int) (floatPosition * 100); // 100 = top, 0 = bottom (Handy API)
-            int positionChange = Math.abs(position - lastPosition);
-            if (minimalValueChange > positionChange)
-            {
-                return;
-            }
-            lastPosition = position;
-            int t = (int) (System.currentTimeMillis() - INIT_TIME_MS + timeOffsetMs);
-            hspPoints.add(new HspPoint(t, position));
-            onValueChange.accept(position);
-        }
-    }
-
-    /**
-     * @param value Root proximity in 0-1 range (1 = fully inserted and 0 = fully out).
-     * @return Penetration amount in 0-1 range (1 = fully inserted).
-     * Calculated from the exposed length and the auto-detected penetrator length. Until the length is detected
-     * it returns 0, so that the device stays in place instead of moving based on a wrong length.
-     */
-    private Float calculatePenetration(Float value)
-    {
-        Float penetratorLength = penetratorLengthDetector.getLength();
-        if (penetratorLength == null)
-        {
-            // Penetrator length is not known yet (root and tip proximity were not received together yet)
-            return 0.f;
-        }
-        float exposedLength = 1.f - value;
-        float exposedRatio = exposedLength / penetratorLength;
-        float penetrationValue = Math.max(1.f - exposedRatio, 0.f); // Prevent negative values
-        return Math.min(penetrationValue, 1.f); // Cap at 1.f
-    }
-
-    @Override
-    public void run()
-    {
-        new Thread(this::runSendingLogicInInfiniteLoop).start();
-    }
-
-    private void runSendingLogicInInfiniteLoop()
-    {
-        long lastMessageSentMs = 0;
-        while (true)
-        {
-            try
-            {
-                lastMessageSentMs = trySendingMessage(lastMessageSentMs);
-                delayUntilNextMessageCanBeSent(lastMessageSentMs);
-            }
-            catch (Exception e)
-            {
-                log.error("Caught exception!", e);
-            }
-        }
-    }
-
-    private void delayUntilNextMessageCanBeSent(long lastMessageSentMs)
-    {
-        long timeUntilNextMsg = getTimeUntilNextMsg(lastMessageSentMs);
-        if (timeUntilNextMsg <= 0)
-        {
-            sleepSafe(5); // Small sleep to avoid heavy CPU usage when no points to send
-            return;
-        }
-        sleepSafe(timeUntilNextMsg);
-    }
-
-    private void sleepSafe(long sleepMs)
-    {
-        try
-        {
-            Thread.sleep(sleepMs);
-        }
-        catch (InterruptedException e)
-        {
-            log.error("Error while sleeping: {}", e.getMessage());
-        }
-    }
-
-    @SneakyThrows
-    private long trySendingMessage(long lastMessageSentMs)
-    {
-        if (hspPoints.isEmpty() || getTimeUntilNextMsg(lastMessageSentMs) > 5)
+        if (points.isEmpty() || getTimeUntilNextMsg(lastMessageSentMs) > 5)
         {
             return lastMessageSentMs;
         }
-        List<HspPoint> hspPointsCopy = getAndClearHspPoints();
+        List<MovementPoint> hspPointsCopy = getAndClearMovementPoints();
         savePointsToFileIfRequested(hspPointsCopy);
         lastMessageSentMs = System.currentTimeMillis();
         Thread.startVirtualThread(() -> sendHspMessage(hspPointsCopy));
         return lastMessageSentMs;
     }
 
-    private void savePointsToFileIfRequested(List<HspPoint> hspPointsCopy)
+    private List<MovementPoint> getAndClearMovementPoints()
     {
-        if (!savePointsToFile) return;
-        if (firstRecordedPointTime == null) firstRecordedPointTime = hspPointsCopy.getFirst().t();
-
-        byte[] data = hspPointsCopy.stream()
-                .map(point -> "\n%s,%s".formatted(point.t() - firstRecordedPointTime, point.x()))
-                .collect(Collectors.joining())
-                .getBytes();
-        try
-        {
-            Files.write(Path.of(HSP_POINTS_FILE_NAME), data, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        }
-        catch (IOException e)
-        {
-            log.error("Failed to save points {} to file: {}", hspPointsCopy, e.getMessage());
-        }
-    }
-
-    private List<HspPoint> getAndClearHspPoints()
-    {
-        List<HspPoint> hspPointsCopy;
-        synchronized (hspPoints)
-        {
-            hspPointsCopy = new ArrayList<>(hspPoints);
-            hspPoints.clear();
-        }
+        List<MovementPoint> hspPointsCopy = drainPoints();
 
         if (clamp)
         {
@@ -301,21 +131,21 @@ public class HspParameterProcessor implements ParameterProcessor
                     .collect(Collectors.toCollection(ArrayList::new));
             log.warn("Skipped some points before sending {}", hspPointsCopy);
         }
-        if (hspPointsCopy.get(0).t() <= (System.currentTimeMillis() - INIT_TIME_MS))
+        if (hspPointsCopy.get(0).t() <= (System.currentTimeMillis() - initTimeMs))
         {
-            log.error("Some points are outdated before sending! hspPointsCopy={}, currentTime={}", hspPointsCopy, System.currentTimeMillis() - INIT_TIME_MS);
+            log.error("Some points are outdated before sending! hspPointsCopy={}, currentTime={}", hspPointsCopy, System.currentTimeMillis() - initTimeMs);
         }
         return hspPointsCopy;
     }
 
     // Collapse intermediate points that continue in the same direction:
     // keep only turning points (and the last point of a monotonic run).
-    List<HspPoint> clampPoints(List<HspPoint> points)
+    List<MovementPoint> clampPoints(List<MovementPoint> points)
     {
-        points.sort(Comparator.comparing(HspPoint::t));
-        List<HspPoint> result = new ArrayList<>();
+        points.sort(Comparator.comparing(MovementPoint::t));
+        List<MovementPoint> result = new ArrayList<>();
 
-        for (HspPoint p : points)
+        for (MovementPoint p : points)
         {
             if (lastX == null)
             {
@@ -345,57 +175,36 @@ public class HspParameterProcessor implements ParameterProcessor
         return result;
     }
 
-    private void sendHspMessage(List<HspPoint> hspPointsCopy)
+    private void sendHspMessage(List<MovementPoint> hspPointsCopy)
     {
         try
         {
             HandyHspAddResponse response = handyClient.hspAdd(new HspAddRequest(hspPointsCopy, false));
             if (response.error() != null)
             {
-                log.error("Error when sending command to Handy! (reason: {})", response.error().message());
+                // A problem that lasts (device not responding, points rejected) would otherwise flood the log
+                // with one entry per batch, so repeats are summarized.
+                hspAddErrors.error("Error when sending command to Handy! (reason: %s)".formatted(response.error().message()));
             }
             else if (response.result() != null)
             {
                 int currentTimeResponse = response.result().current_time();
                 int firstPointTime = hspPointsCopy.getFirst().t();
                 log.trace("[HSP] Successfully sent command (hspPoints={}, timeOffsetLeeway={}, response={})", hspPointsCopy, firstPointTime - currentTimeResponse, response);
-                logPotentialIssues(hspPointsCopy, firstPointTime, response.result().last_point_time(), currentTimeResponse, response.result().first_point_time());
+                // NOTE: the returned state has already been checked against the sent points by the client that
+                // received it (skipped points, starving stream, saturated buffer) and problems are reported there.
             }
         }
         catch (Exception e)
         {
-            if (e.getMessage().contains("GOAWAY received"))
+            if (ConnectionRetry.isConnectionFailure(e))
             {
-                log.warn("Recieved GOAWAY, dropped points={}", hspPointsCopy);
+                // The client has already repeated the batch once on a new connection, so the API connection is
+                // really gone and the points of this batch are lost
+                log.warn("Lost connection to the Handy API, dropped points={} (reason: {})", hspPointsCopy, e.getMessage());
                 return;
             }
             log.error("Exception when sending hsp points: {}", e.getMessage());
         }
-    }
-
-    private void logPotentialIssues(List<HspPoint> hspPointsCopy, int firstPointTime, Integer lastPointTimeResponse, int currentTimeResponse, Integer firstPointTimeResponse)
-    {
-        if (lastPointTimeResponse == null || firstPointTimeResponse == null)
-        {
-            return;
-        }
-        if (currentTimeResponse >= lastPointTimeResponse)
-        {
-            log.warn("All points skipped! (current_time={}, last_point_time={})", currentTimeResponse, lastPointTimeResponse);
-        }
-        if (firstPointTimeResponse >= lastPointTimeResponse)
-        {
-            log.warn("First point time is later than last point time! (first_point_time={}, last_point_time={})", firstPointTimeResponse, lastPointTimeResponse);
-        }
-        if (firstPointTime - currentTimeResponse <= 0)
-        {
-            log.warn("Skipped some points! (1stSentPointTime={}, last_point_time={}, current_time={})", firstPointTime, lastPointTimeResponse, currentTimeResponse);
-        }
-    }
-
-    private long getTimeUntilNextMsg(long lastMessageSentMs)
-    {
-        long timeElapsedSinceLastMessage = System.currentTimeMillis() - lastMessageSentMs;
-        return timeBetweenMessages - timeElapsedSinceLastMessage;
     }
 }
