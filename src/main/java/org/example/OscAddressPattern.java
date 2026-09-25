@@ -28,7 +28,9 @@ public class OscAddressPattern
     public OscAddressPattern(String pattern)
     {
         this.pattern = pattern;
-        this.selector = new OSCPatternAddressMessageSelector(pattern);
+        // VRChat parameter names may contain characters OSC forbids (for example spaces), so pattern and
+        // address are both sanitized the same way before they are matched
+        this.selector = new OSCPatternAddressMessageSelector(OscAddressSanitizer.sanitizePattern(pattern));
     }
 
     public String pattern()
@@ -38,11 +40,14 @@ public class OscAddressPattern
 
     public boolean matches(String address)
     {
-        return matches(new OSCMessageEvent(EVENT_SOURCE, OSCTimeTag64.IMMEDIATE, new OSCMessage(address, List.of())));
+        return matches(new OSCMessageEvent(EVENT_SOURCE, OSCTimeTag64.IMMEDIATE,
+                new OSCMessage(OscAddressSanitizer.sanitizeAddress(address), List.of())));
     }
 
     public boolean matches(OSCMessageEvent messageEvent)
     {
+        // Messages received from VRChat already had their forbidden characters replaced by the lenient
+        // parser of OscListener, which is exactly what the selector was built with above
         return selector.matches(messageEvent);
     }
 

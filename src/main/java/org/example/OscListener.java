@@ -22,9 +22,11 @@ public class OscListener
     public OscListener(int portIn) throws IOException
     {
         // Listeners are added from another thread while the listening thread dispatches received packets,
-        // so a thread-safe list is used instead of the plain one created by the OSCPortIn constructor
+        // so a thread-safe list is used instead of the plain one created by the OSCPortIn constructor.
+        // The lenient builder accepts the addresses VRChat sends for avatar parameters whose names contain
+        // characters the OSC specification forbids (for example spaces)
         this.oscListener = new OSCPortIn(
-                new OSCSerializerAndParserBuilder(),
+                new LenientOscSerializerAndParserBuilder(),
                 new CopyOnWriteArrayList<>(OSCPortIn.defaultPacketListeners()),
                 new InetSocketAddress(portIn));
         this.oscListener.setDaemonListener(false);
