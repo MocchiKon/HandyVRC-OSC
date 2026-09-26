@@ -18,6 +18,10 @@ public record ConfigProperties(
         boolean clamp,
         boolean pauseOnStarving,
         boolean hdspTiming,
+        Integer hdspSpeedChangeThresholdPercent,
+        Integer hdspSpeedStopThresholdPercent,
+        Integer hdspDivergenceThresholdPercent,
+        Integer hdspSpeedMeasureWindowMs,
         int handyApiVersion,
         int listenOnPort,
         boolean useOscQuery,
@@ -50,6 +54,10 @@ public record ConfigProperties(
                 ", clamp=" + clamp +
                 ", pauseOnStarving=" + pauseOnStarving +
                 ", hdspTiming=" + hdspTiming +
+                ", hdspSpeedChangeThresholdPercent=" + hdspSpeedChangeThresholdPercent +
+                ", hdspSpeedStopThresholdPercent=" + hdspSpeedStopThresholdPercent +
+                ", hdspDivergenceThresholdPercent=" + hdspDivergenceThresholdPercent +
+                ", hdspSpeedMeasureWindowMs=" + hdspSpeedMeasureWindowMs +
                 ", handyApiVersion=" + handyApiVersion +
                 ", listenOnPort=" + listenOnPort +
                 ", useOscQuery=" + useOscQuery +

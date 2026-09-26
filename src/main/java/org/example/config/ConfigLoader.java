@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.example.Main;
+import org.example.processor.HdspSmoothedParameterProcessor;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
@@ -98,6 +99,14 @@ public class ConfigLoader
         boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
         boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
         boolean hdspTiming = Boolean.parseBoolean(getPropertyOrDefault(properties, "hdspTiming", "false"));
+        Integer hdspSpeedChangeThresholdPercent = getProperty(properties, "hdspSpeedChangeThresholdPercent")
+                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_CHANGE_THRESHOLD_PERCENT);
+        Integer hdspSpeedStopThresholdPercent = getProperty(properties, "hdspSpeedStopThresholdPercent")
+                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_STOP_THRESHOLD_PERCENT);
+        Integer hdspDivergenceThresholdPercent = getProperty(properties, "hdspDivergenceThresholdPercent")
+                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_DIVERGENCE_THRESHOLD_PERCENT);
+        Integer hdspSpeedMeasureWindowMs = getProperty(properties, "hdspSpeedMeasureWindowMs")
+                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_MEASURE_WINDOW_MS);
         boolean useOscQuery = Boolean.parseBoolean(getPropertyOrDefault(properties, "useOscQuery", "true"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
@@ -126,6 +135,10 @@ public class ConfigLoader
                 .clamp(clamp)
                 .pauseOnStarving(pauseOnStarving)
                 .hdspTiming(hdspTiming)
+                .hdspSpeedChangeThresholdPercent(hdspSpeedChangeThresholdPercent)
+                .hdspSpeedStopThresholdPercent(hdspSpeedStopThresholdPercent)
+                .hdspDivergenceThresholdPercent(hdspDivergenceThresholdPercent)
+                .hdspSpeedMeasureWindowMs(hdspSpeedMeasureWindowMs)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
                 .useOscQuery(useOscQuery)
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
@@ -154,12 +167,19 @@ public class ConfigLoader
      */
     static String validateConnectionMode(ParameterProcessorType processingAlgorithm, ConnectionMode connectionMode)
     {
-        if (processingAlgorithm == ParameterProcessorType.HDSP && connectionMode != ConnectionMode.BLUETOOTH)
+        if (isHdsp(processingAlgorithm) && connectionMode != ConnectionMode.BLUETOOTH)
         {
-            return ("Processing algorithm HDSP is only supported with Bluetooth! Set connectionMode=BLUETOOTH "
-                    + "or use processingAlgorithm=HSP (default). Closing app...");
+            return ("Processing algorithm %s is only supported with Bluetooth! Set connectionMode=BLUETOOTH "
+                    + "or use processingAlgorithm=HSP (default). Closing app...").formatted(processingAlgorithm);
         }
         return null;
+    }
+
+    /** Both HDSP variants are direct streaming protocols and therefore share the same connection requirements. */
+    static boolean isHdsp(ParameterProcessorType processingAlgorithm)
+    {
+        return processingAlgorithm == ParameterProcessorType.HDSP
+                || processingAlgorithm == ParameterProcessorType.HDSP_SMOOTHED;
     }
 
     /**

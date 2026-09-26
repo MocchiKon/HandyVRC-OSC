@@ -6,6 +6,7 @@ import org.example.config.ConfigProperties;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.MessageDelayStats;
+import org.example.handy.common.RateLimitedLogger;
 import org.example.handy.common.dto.MovementPoint;
 import org.example.handy.common.dto.SliderSettingsResult;
 
@@ -20,6 +21,10 @@ import static org.example.Main.delayedClosingWithLog;
  * the newest position is sent together with the time the device should take to reach it (an XPT command).
  * Because of that it is a best-effort, low-latency protocol that only makes sense over a direct Bluetooth
  * connection, so it is rejected for API connections.
+ * <p>
+ * The positions used inside the app are percentages (0-100), but HDSP works with normalized positions
+ * (0.0-1.0 of the configured stroke zone). The conversion is done here, before the command is handed to a
+ * client, because it is a property of the protocol and not of the connection the command is sent over.
  * <p>
  * When {@code hdspTiming} is enabled the processor additionally schedules each command so that it reaches the
  * device right when the previously requested move finishes, avoiding interrupting a move that is still running.
@@ -38,7 +43,7 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
      */
     public static final int HDSP_MAX_MOVE_DURATION_MS = 200;
     /** Input is considered stopped (and the device is told to stop) when no new point was produced for this long. */
-    public static final int HDSP_IDLE_STOP_TIMEOUT_MS = 200;
+    public static final int HDSP_IDLE_STOP_TIMEOUT_MS = 150;
     /** How often the send loop wakes up while timing is enabled (to hit the scheduled send closely). */
     private static final int HDSP_TIMING_POLL_MS = 5;
     /** Upper bound for the delay-jitter safety margin, so a noisy measurement cannot add huge gaps. */
@@ -55,6 +60,9 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
     private boolean stopped;
     /** App-time from which the next command may be sent (used by the timing schedule only). */
     private long nextSendAllowedAtMs;
+    private boolean pauseOnStarving;
+    /** One command is sent per position, so an out of range position would otherwise flood the log. */
+    private final RateLimitedLogger positionWarnings = new RateLimitedLogger(log);
 
     // Tests only
     HdspParameterProcessor(ConfigProperties config)
@@ -67,6 +75,7 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
     {
         super(handyClient, config);
         this.hdspTiming = config.hdspTiming();
+        this.pauseOnStarving = config.pauseOnStarving();
 
         HandyBaseResponseWithError response = handyClient.changeMode(DeviceModeValue.HDSP);
         if (response.error() != null)
@@ -125,11 +134,12 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
         }
 
         // No points waiting: when the input goes quiet, tell the device to stop at the last known position.
-        if (shouldStopForIdle(now))
-        {
-            sendIdleStop();
-            return now;
-        }
+        // Commented out because it makes slider bounce back too much
+        // if (shouldStopForIdle(now))
+        // {
+        //     sendIdleStop();
+        //     return now;
+        // }
         return lastMessageSentMs;
     }
 
@@ -154,7 +164,7 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
         Integer lastSentPointTime = lastSentPoint != null ? lastSentPoint.t() : null;
         int durationMs = resolveMoveDurationMs(lastSentPointTime, targetPoint.t(), getSendIntervalMs(), afterIdleStop);
 
-        sendHdspMove(targetPoint, durationMs, false);
+        sendHdspMove(targetPoint, durationMs, pauseOnStarving);
         lastSentPoint = targetPoint;
         lastPointActivityMs = now;
         stopped = false;
@@ -192,7 +202,7 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
     private void sendIdleStop()
     {
         int durationMs = clampDuration(getSendIntervalMs());
-        log.debug("[HDSP] No new points for {}ms, stopping at last known position {}",
+        log.debug("[HDSP] No new points for {}ms, stopping at last known position {}%",
                 HDSP_IDLE_STOP_TIMEOUT_MS, lastSentPoint.x());
         sendHdspMove(lastSentPoint, durationMs, true);
         stopped = true;
@@ -218,7 +228,7 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
 
     private static int clampDuration(long durationMs)
     {
-        return (int) Math.max(1, Math.min(durationMs, HDSP_MAX_MOVE_DURATION_MS));
+        return Math.clamp(durationMs, 1, HDSP_MAX_MOVE_DURATION_MS);
     }
 
     @Override
@@ -241,19 +251,43 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
     {
         try
         {
-            HandyBaseResponseWithError response = handyClient.hdspXpt(targetPoint.x(), durationMs, stopOnTarget);
+            // Positions leave the processor normalized (0.0-1.0), which is the unit HDSP uses, so that no client
+            // has to know about the percentage positions used inside the app.
+            float normalizedXp = toNormalizedPosition(targetPoint.x());
+            HandyBaseResponseWithError response = handyClient.hdspXpt(normalizedXp, durationMs, stopOnTarget);
             if (response.error() != null)
             {
                 log.error("Error when sending HDSP command to Handy! (reason: {})", response.error().message());
             }
             else
             {
-                log.trace("[HDSP] Successfully sent command (xp={}, t={}ms, stopOnTarget={})", targetPoint.x(), durationMs, stopOnTarget);
+                log.trace("[HDSP] Successfully sent command (xp={} ({}%), t={}ms, stopOnTarget={})",
+                        normalizedXp, targetPoint.x(), durationMs, stopOnTarget);
             }
         }
         catch (Exception e)
         {
             log.error("Exception when sending HDSP command: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Converts a percentage position (0-100, the unit used inside the app) into the normalized position
+     * (0.0-1.0 of the stroke zone) that the HDSP protocol uses.
+     * <p>
+     * The device silently caps positions outside its range, so an out of range position (which out of range OSC
+     * values can produce) would end up as a move to the end of the stroke instead of the requested one; such
+     * positions are therefore clamped and reported.
+     *
+     * @param percentPosition position in the 0-100 range
+     * @return the same position in the 0.0-1.0 range
+     */
+    float toNormalizedPosition(float percentPosition)
+    {
+        if (percentPosition < 0f || percentPosition > 100f)
+        {
+            positionWarnings.warn("[HDSP] Position %s%% is outside the 0-100%% range, clamping it".formatted(percentPosition));
+        }
+        return Math.clamp(percentPosition / 100f, 0f, 1f);
     }
 }

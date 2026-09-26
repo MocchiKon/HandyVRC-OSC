@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -120,10 +121,13 @@ class ConfigLoaderTest
     @Test
     void hdspIsOnlyValidWithBluetooth()
     {
-        assertThat(ConfigLoader.validateConnectionMode(ParameterProcessorType.HDSP, ConnectionMode.BLUETOOTH)).isNull();
-        assertThat(ConfigLoader.validateConnectionMode(ParameterProcessorType.HDSP, ConnectionMode.API))
-                .contains("HDSP")
-                .contains("Bluetooth");
+        for (var algorithm : List.of(ParameterProcessorType.HDSP, ParameterProcessorType.HDSP_SMOOTHED))
+        {
+            assertThat(ConfigLoader.validateConnectionMode(algorithm, ConnectionMode.BLUETOOTH)).isNull();
+            assertThat(ConfigLoader.validateConnectionMode(algorithm, ConnectionMode.API))
+                    .contains(algorithm.name())
+                    .contains("Bluetooth");
+        }
     }
 
     @Test

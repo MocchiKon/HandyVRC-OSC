@@ -23,13 +23,19 @@ public abstract class HandyClient implements AutoCloseable
     public abstract Optional<SliderSettingsResult> getSliderSettings();
 
     /**
-     * HDSP (Handy Direct Streaming Protocol): moves the slider to the given percent position (0-100) using the
-     * given duration (in ms) for the move.
+     * HDSP (Handy Direct Streaming Protocol): moves the slider to the given position using the given duration
+     * (in ms) for the move.
+     * <p>
+     * The position is the normalized HDSP position in the 0.0-1.0 range of the configured stroke zone, which is
+     * the unit the device protocol uses. The HDSP processor converts the percentage positions used in the rest
+     * of the app before calling this, so an implementation only has to translate the command into its own wire
+     * format: the BLE protocol takes the position as it is, while the HDSP endpoints of the Handy REST API take
+     * percent (0-100) and a client for them would have to scale it up.
      * <p>
      * HDSP is only available over a direct Bluetooth connection. The default implementation rejects it so that
      * API clients cannot accidentally use it.
      *
-     * @param xp percent position in 0-100 range (relative to the configured stroke zone)
+     * @param xp normalized position in the 0.0-1.0 range (relative to the configured stroke zone)
      * @param t time in milliseconds the device should take to reach the position
      * @param stopOnTarget stop the slider motor when the target position is reached
      */
