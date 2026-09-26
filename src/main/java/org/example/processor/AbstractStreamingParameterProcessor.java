@@ -37,9 +37,10 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     private int minimalValueChange;
     private SpsType spsType;
     /** Used to auto-detect the penetrator length. Null unless spsType is ORIFICE. */
-    private PenetratorLengthDetector penetratorLengthDetector;
+    protected PenetratorLengthDetector penetratorLengthDetector;
 
-    private Consumer<Integer> onValueChange;
+    /** Notified with the position (0-100) of every produced point; used to drive the UI. */
+    protected Consumer<Integer> onValueChange;
 
     // Recording points
     private boolean savePointsToFile;
@@ -67,9 +68,17 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     @Override
     public void actOnValueChange(Float value)
     {
-        // In PENETRATOR mode the received value is the penetration amount itself (1 = fully inserted),
-        // so it only needs to be converted into a device position (1 = fully out).
-        addPositionPoint(1.f - value);
+        addPositionPoint(toDevicePosition(value));
+    }
+
+    /**
+     * @param value Value received for the configured avatar parameter: in PENETRATOR mode the penetration amount,
+     * in ORIFICE mode the root proximity of the penetrator (1 = fully inserted and 0 = fully out).
+     * @return position in the 0-1 range used by the device (1 = fully out/bottom of the stroke, 0 = fully in/top)
+     */
+    protected float toDevicePosition(Float value)
+    {
+        return 1.f - value;
     }
 
     /**
@@ -87,7 +96,7 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
         penetratorLengthDetector.update(rootProximity, tipProximity);
         if (rootProximity != null)
         {
-            addPositionPoint(1.f - calculatePenetration(rootProximity));
+            addPositionPoint(toDevicePosition(calculatePenetration(rootProximity)));
         }
     }
 
@@ -105,9 +114,10 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
                 return;
             }
             lastPosition = position;
-            int t = (int) (System.currentTimeMillis() - initTimeMs + timeOffsetMs);
+            long now = nowMs();
+            int t = (int) (now - initTimeMs + timeOffsetMs);
             points.add(new MovementPoint(t, position));
-            lastPointActivityMs = System.currentTimeMillis();
+            lastPointActivityMs = now;
             onValueChange.accept(position);
         }
     }
@@ -118,7 +128,7 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
      * Calculated from the exposed length and the auto-detected penetrator length. Until the length is detected
      * it returns 0, so that the device stays in place instead of moving based on a wrong length.
      */
-    private Float calculatePenetration(Float value)
+    protected Float calculatePenetration(Float value)
     {
         Float penetratorLength = penetratorLengthDetector.getLength();
         if (penetratorLength == null)
@@ -197,8 +207,17 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
 
     protected long getTimeUntilNextMsg(long lastMessageSentMs)
     {
-        long timeElapsedSinceLastMessage = System.currentTimeMillis() - lastMessageSentMs;
+        long timeElapsedSinceLastMessage = nowMs() - lastMessageSentMs;
         return getSendIntervalMs() - timeElapsedSinceLastMessage;
+    }
+
+    /**
+     * Current app time in milliseconds. Every timing decision goes through this method, so that tests can replace
+     * the clock instead of sleeping.
+     */
+    protected long nowMs()
+    {
+        return System.currentTimeMillis();
     }
 
     /**

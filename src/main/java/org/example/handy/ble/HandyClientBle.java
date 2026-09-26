@@ -240,7 +240,8 @@ public class HandyClientBle extends HandyClient
     {
         try
         {
-            // Fire-and-forget: HDSP commands are sent continuously, waiting for a response would stall the stream
+            // Fire-and-forget: HDSP commands are sent continuously, waiting for a response would stall the stream.
+            // The position is already normalized (0.0-1.0) by the processor, which owns the HDSP position unit.
             rpc.sendRequestFireAndForget(HandyRpc.Request.newBuilder()
                     .setRequestHdspXpTSet(Messages.RequestHdspXpTSet.newBuilder()
                             .setXp(xp)

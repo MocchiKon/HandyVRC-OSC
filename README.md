@@ -22,6 +22,19 @@ Then run the app by double-clicking "start.bat" file. GUI only displays current 
 * `HSP` (default) buffers timestamped points on the device and works with both `API` and `BLUETOOTH` connection modes.
 * `HDSP` (Handy Direct Streaming Protocol) streams the newest position directly without device-side buffering and works with `BLUETOOTH` only.
   When `hdspTiming=true` it also measures the message delay and its jitter and schedules commands so that a move in progress is not interrupted.
+* `HDSP_SMOOTHED` also uses HDSP, but does not forward the points 1:1 (works with `BLUETOOTH` only). Instead it
+  measures how fast and in which direction you move (over the raw OSC values, including the values that are too
+  small to become a point) and moves the slider towards the top or the bottom of the stroke at that speed:
+  * The speed is corrected only when the measured speed changes by more than `hdspSpeedChangeThresholdPercent`,
+    when you reverse direction, or when the slider fell behind by more than `hdspDivergenceThresholdPercent`, so
+    a constant movement needs no commands at all and never turns into a stream of corrections.
+  * The slider is never told to move further than you actually moved, so it cannot overshoot the next point and
+    bounce back when you slow down or reverse direction.
+  * When you stop moving, the slider is stopped at the position you stopped at instead of finishing the move it
+    was on, and it continues from there when you move again.
+  * Movements slower than 4%/s are treated as a stop. `hdspSpeedMeasureWindowMs` sets how quickly a speed change
+    is followed. With `logLevel=DEBUG` the measured input rate and every command (with the speed it was planned
+    with) are logged, which is what the thresholds can be tuned with.
 
 ## OSCQuery
 By default (`useOscQuery=true`) the app announces itself to VRChat over OSCQuery (mDNS + a small local HTTP server)

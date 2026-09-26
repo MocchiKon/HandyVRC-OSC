@@ -9,10 +9,7 @@ import org.example.handy.common.HandyClient;
 import org.example.handy.v3.HandyClientV3;
 import org.example.oscquery.OscQueryService;
 import org.example.oscquery.VrchatParameterScanner;
-import org.example.processor.HdspParameterProcessor;
-import org.example.processor.HspParameterProcessor;
-import org.example.processor.ParameterProcessor;
-import org.example.processor.SpsType;
+import org.example.processor.*;
 import org.example.update.StartupUpdateCheck;
 
 import javax.swing.*;
@@ -200,6 +197,7 @@ public class Main
         {
             case HSP -> new HspParameterProcessor(handyClient, config);
             case HDSP -> new HdspParameterProcessor(handyClient, config);
+            case HDSP_SMOOTHED -> new HdspSmoothedParameterProcessor(handyClient, config);
         };
     }
 

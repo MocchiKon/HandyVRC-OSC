@@ -6,6 +6,7 @@ import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.MessageDelayStats;
 import org.example.handy.common.dto.*;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 class HdspParameterProcessorTest
 {
@@ -56,9 +58,14 @@ class HdspParameterProcessorTest
         processor.actOnValueChange(0.5f); // Position 50
         processor.trySendingMessage(0);
 
-        assertThat(client.hdspCalls).containsExactly(new HdspCall(50f, 20, false));
+        assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
     }
 
+    /**
+     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
+     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
+     */
+    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
     @Test
     void deviceIsStoppedWhenPointsStopComing()
     {
@@ -72,10 +79,15 @@ class HdspParameterProcessorTest
         processor.trySendingMessage(0);
 
         assertThat(client.hdspCalls).containsExactly(
-                new HdspCall(50f, 20, false),
-                new HdspCall(50f, 20, true));
+                new HdspCall(xp(50), 20, false),
+                new HdspCall(xp(50), 20, true));
     }
 
+    /**
+     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
+     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
+     */
+    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
     @Test
     void stopIsSentOnlyOnce()
     {
@@ -91,6 +103,11 @@ class HdspParameterProcessorTest
         assertThat(client.hdspCalls).hasSize(2);
     }
 
+    /**
+     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
+     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
+     */
+    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
     @Test
     void pointAfterStopUsesTheSameIntervalAsTheFirstPoint()
     {
@@ -104,7 +121,7 @@ class HdspParameterProcessorTest
         processor.actOnValueChange(0.2f); // Position 80
         processor.trySendingMessage(0);
 
-        assertThat(client.hdspCalls.getLast()).isEqualTo(new HdspCall(80f, 20, false));
+        assertThat(client.hdspCalls.getLast()).isEqualTo(new HdspCall(xp(80), 20, false));
     }
 
     @Test
@@ -119,7 +136,7 @@ class HdspParameterProcessorTest
         processor.trySendingMessage(0); // Sends the movement
         processor.trySendingMessage(0); // Would stop it immediately if the activity time was not refreshed
 
-        assertThat(client.hdspCalls).containsExactly(new HdspCall(50f, 20, false));
+        assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
     }
 
     @Test
@@ -164,6 +181,11 @@ class HdspParameterProcessorTest
         assertThat(client.hdspCalls).hasSize(2);
     }
 
+    /**
+     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
+     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
+     */
+    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
     @Test
     void pointAfterStopIsSentImmediatelyEvenWithTimingEnabled()
     {
@@ -181,7 +203,7 @@ class HdspParameterProcessorTest
 
         assertThat(client.hdspCalls).hasSize(3);
         assertThat(client.hdspCalls.get(1).stopOnTarget()).isTrue();
-        assertThat(client.hdspCalls.get(2)).isEqualTo(new HdspCall(80f, 20, false));
+        assertThat(client.hdspCalls.get(2)).isEqualTo(new HdspCall(xp(80), 20, false));
     }
 
     @Test
@@ -221,6 +243,32 @@ class HdspParameterProcessorTest
         assertThat(HdspParameterProcessor.resolveMoveDurationMs(500, 100, 20, false)).isEqualTo(1);
     }
 
+    @Test
+    void positionsAreNormalizedIntoTheDeviceRange()
+    {
+        var processor = processor(new RecordingHandyClient(), false);
+
+        assertThat(processor.toNormalizedPosition(0f)).isEqualTo(0f);
+        assertThat(processor.toNormalizedPosition(37f)).isCloseTo(0.37f, within(0.0001f));
+        assertThat(processor.toNormalizedPosition(100f)).isEqualTo(1f);
+    }
+
+    @Test
+    void positionsOutsideTheStrokeAreClamped()
+    {
+        var client = new RecordingHandyClient();
+        var processor = processor(client, false);
+
+        // Out of range OSC values must not reach the device: it would cap them silently, which turns them into
+        // a move to the end of the stroke instead of the requested position
+        processor.actOnValueChange(1.5f); // Position -50
+        processor.trySendingMessage(0);
+        processor.actOnValueChange(-0.5f); // Position 150
+        processor.trySendingMessage(0);
+
+        assertThat(client.hdspCalls).extracting(HdspCall::xp).containsExactly(0f, 1f);
+    }
+
     private static HdspParameterProcessor processor(HandyClient handyClient, boolean hdspTiming)
     {
         var processor = new HdspParameterProcessor(handyClient, ConfigProperties.builder()
@@ -232,6 +280,13 @@ class HdspParameterProcessorTest
         return processor;
     }
 
+    /** The processor normalizes positions before sending them, so a percentage position is expected as a fraction. */
+    private static float xp(int percent)
+    {
+        return percent / 100f;
+    }
+
+    /** Recorded HDSP command, with the position as it was sent to the client (normalized, 0.0-1.0). */
     private record HdspCall(float xp, int t, boolean stopOnTarget) {}
 
     /** Minimal HandyClient that records the HDSP commands instead of talking to a device. */
