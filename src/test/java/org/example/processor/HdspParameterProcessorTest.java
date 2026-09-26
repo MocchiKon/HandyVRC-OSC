@@ -34,6 +34,25 @@ class HdspParameterProcessorTest
     }
 
     @Test
+    void penetrationValueIsMappedToFullyPenetratedAtValue()
+    {
+        var client = new RecordingHandyClient();
+        var processor = new HdspParameterProcessor(client, ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .fullyPenetratedAtValue(50f)
+                .build());
+        processor.setValueChangeListener(value -> {});
+
+        processor.actOnValueChange(0.125f); // 12.5% -> 25% penetration -> normalized position 0.75
+        processor.trySendingMessage(0);
+        processor.actOnValueChange(0.5f); // 50% counts as fully penetrated -> normalized position 0.0
+        processor.trySendingMessage(0);
+
+        assertThat(client.hdspCalls).extracting(HdspCall::xp).containsExactly(0.75f, 0f);
+    }
+
+    @Test
     void minimalValueChangeIsRespected()
     {
         var processor = new HdspParameterProcessor(ConfigProperties.builder()

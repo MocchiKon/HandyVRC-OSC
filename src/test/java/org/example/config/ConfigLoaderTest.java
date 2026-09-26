@@ -158,6 +158,54 @@ class ConfigLoaderTest
         assertThat(config.listenOnPort()).isEqualTo(9123);
     }
 
+    @Test
+    void loadsFullyPenetratedAtValue() throws IOException
+    {
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                fullyPenetratedAtValue=50
+                """);
+
+        assertThat(config.fullyPenetratedAtValue()).isEqualTo(50f);
+    }
+
+    @Test
+    void ignoresFullyPenetratedAtValueThatIsNotUsableAsPercentage() throws IOException
+    {
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                fullyPenetratedAtValue=0
+                """);
+
+        assertThat(config.fullyPenetratedAtValue()).isNull();
+    }
+
+    @Test
+    void doesNotUseMappingByDefault() throws IOException
+    {
+        // an app.properties written by an older version has no fullyPenetratedAtValue property
+        var config = loadConfig("""
+                connectionMode=BLUETOOTH
+                spsType=PENETRATOR
+                sendMessageEveryMs=0
+                """);
+
+        assertThat(config.fullyPenetratedAtValue()).isNull();
+    }
+
+    @Test
+    void acceptsFullyPenetratedAtValueUpToHundredPercent()
+    {
+        assertThat(ConfigLoader.validateFullyPenetratedAtValue(null)).isNull();
+        assertThat(ConfigLoader.validateFullyPenetratedAtValue(50f)).isNull();
+        assertThat(ConfigLoader.validateFullyPenetratedAtValue(100f)).isNull();
+        assertThat(ConfigLoader.validateFullyPenetratedAtValue(101f)).contains("fullyPenetratedAtValue");
+    }
+
     private ConfigProperties loadConfig(String configContent) throws IOException
     {
         Path configPath = Files.createTempFile("app", ".properties");

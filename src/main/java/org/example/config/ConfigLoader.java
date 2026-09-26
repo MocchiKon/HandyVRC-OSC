@@ -127,6 +127,8 @@ public class ConfigLoader
             log.info("Penetrator length will be auto-detected from root proximity '{}' and tip proximity '{}'", avatarParameter, penetratorTipParameter);
         }
 
+        Float fullyPenetratedAtValue = resolveFullyPenetratedAtValue(properties);
+
         var config = ConfigProperties.builder()
                 .connectionMode(connectionMode)
                 .testMode(testMode)
@@ -152,6 +154,7 @@ public class ConfigLoader
                 .penetratorTipParameter(penetratorTipParameter)
                 .sliderMin(getProperty(properties, "sliderMin").map(Float::parseFloat).orElse(null))
                 .sliderMax(getProperty(properties, "sliderMax").map(Float::parseFloat).orElse(null))
+                .fullyPenetratedAtValue(fullyPenetratedAtValue)
                 .spsType(spsType)
                 .build();
         log.info("Loaded config: {}", config.toLoggableString());
@@ -180,6 +183,45 @@ public class ConfigLoader
     {
         return processingAlgorithm == ParameterProcessorType.HDSP
                 || processingAlgorithm == ParameterProcessorType.HDSP_SMOOTHED;
+    }
+
+    /**
+     * Reads 'fullyPenetratedAtValue', which is a percentage of the received penetration value. A blank property
+     * disables the mapping, a value that cannot be used as a percentage (0 or less) is ignored with a warning.
+     */
+    private Float resolveFullyPenetratedAtValue(Properties properties)
+    {
+        Float value = getProperty(properties, "fullyPenetratedAtValue").map(Float::parseFloat).orElse(null);
+        String error = validateFullyPenetratedAtValue(value);
+        if (error != null)
+        {
+            delayedClosingWithLog(error);
+        }
+        if (value == null)
+        {
+            return null;
+        }
+        if (value <= 0)
+        {
+            log.warn("'fullyPenetratedAtValue' has to be greater than 0 because it is a percentage, ignoring it"
+                    + " (penetration values will be used as they are)");
+            return null;
+        }
+        log.info("Penetration values will be mapped so that {}% counts as fully penetrated", value);
+        return value;
+    }
+
+    /**
+     * @return an error message when the configured value cannot be used, or null when it is valid
+     */
+    static String validateFullyPenetratedAtValue(Float fullyPenetratedAtValue)
+    {
+        if (fullyPenetratedAtValue != null && fullyPenetratedAtValue > 100)
+        {
+            return ("Invalid 'fullyPenetratedAtValue' (%s)! It is a percentage of the received penetration value, so"
+                    + " it has to be between 0 and 100. Closing app...").formatted(fullyPenetratedAtValue);
+        }
+        return null;
     }
 
     /**

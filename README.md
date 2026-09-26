@@ -71,7 +71,10 @@ or breaks the app - and it can be turned off with `checkForUpdates=false` in app
    (can be done here https://onboarding.handyfeeling.com/#/onboarding/settings/connection).
    The light on Handy should be only pink in the Wifi only mode. (Device Latency can be checked at https://new.handyfeeling.com/#/settings)
 3. Reducing stroke range limits too much can make slow movements too slow and Handy may have trouble moving to the request position within requested time
-   (recommended `sliderMin=0` and `sliderMax=1` for full range)
+   (recommended `sliderMin=0` and `sliderMax=1` for full range).
+   `fullyPenetratedAtValue` is different from these limits: it only maps the received penetration value, so with
+   `fullyPenetratedAtValue=50` a penetration of 50% moves the slider as far as 100% would (10% behaves like 20%,
+   and 80% or more behaves like 100%). Leave it blank to use the penetration value as it is.
 4. Avatar positioning during 'act' is very important due to how SPS works. Handy stability, range and movement speed matters, if it's too low
    Handy may not be able to perform small movements in satisfying way. Therefore, handjobs work the best.
    <br/>NOTE: (ORIFICE `spsType` only) Penetrator length is auto-detected from the SPS root/tip proximity parameters, so `avatarParameter` has to be a `NewRoot` parameter (the `NewTip` one is derived from it).
