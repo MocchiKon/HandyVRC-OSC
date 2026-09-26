@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.function.DoubleUnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * Tests of the HDSP_SMOOTHED algorithm. The processor is driven with a virtual clock, so a whole movement can be
@@ -34,6 +35,21 @@ class HdspSmoothedParameterProcessorTest
         harness.advance(100);
 
         assertThat(harness.client.calls).isEmpty();
+    }
+
+    @Test
+    void inputValuesAreMappedToFullyPenetratedAtValue()
+    {
+        var config = ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .fullyPenetratedAtValue(50f)
+                .build();
+        var harness = new Harness(config);
+
+        harness.feed(0.75f); // Received penetration 25%, which counts as 50% of the stroke
+
+        assertThat(harness.processor.sliderPositionForTest(harness.virtualTimeMs())).isCloseTo(0.5, within(0.001));
     }
 
     @Test

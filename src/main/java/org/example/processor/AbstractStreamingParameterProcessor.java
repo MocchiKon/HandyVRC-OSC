@@ -36,6 +36,11 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     private int lastPosition = 100;
     private int minimalValueChange;
     private SpsType spsType;
+    /**
+     * Penetration value (in percent of the received value, so 100 means no mapping) that counts as fully
+     * penetrated. Null when the mapping is disabled.
+     */
+    private final Float fullyPenetratedAtValue;
     /** Used to auto-detect the penetrator length. Null unless spsType is ORIFICE. */
     protected PenetratorLengthDetector penetratorLengthDetector;
 
@@ -54,6 +59,7 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
         this.timeBetweenMessages = config.sendMessageEveryMs();
         this.minimalValueChange = config.minimalValueChange();
         this.spsType = config.spsType();
+        this.fullyPenetratedAtValue = resolveFullyPenetratedAtValue(config);
         // Penetrator length is only needed (and only auto-detected) for orifice
         this.penetratorLengthDetector = spsType == SpsType.ORIFICE ? new PenetratorLengthDetector() : null;
         this.savePointsToFile = config.savePointsToFile();
@@ -72,13 +78,38 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     }
 
     /**
-     * @param value Value received for the configured avatar parameter: in PENETRATOR mode the penetration amount,
-     * in ORIFICE mode the root proximity of the penetrator (1 = fully inserted and 0 = fully out).
-     * @return position in the 0-1 range used by the device (1 = fully out/bottom of the stroke, 0 = fully in/top)
+     * @param penetration Penetration amount in the 0-1 range (1 = fully penetrated): the value received for the
+     * configured avatar parameter in PENETRATOR mode, or the value calculated from the root proximity in ORIFICE mode.
+     * @return position in the 0-1 range used by the device (1 = fully out/top of the stroke, 0 = fully in/bottom)
      */
-    protected float toDevicePosition(Float value)
+    protected float toDevicePosition(Float penetration)
     {
-        return 1.f - value;
+        return 1.f - mapToFullyPenetrated(penetration);
+    }
+
+    /**
+     * Maps a penetration value onto the full stroke: 'fullyPenetratedAtValue' counts as fully penetrated (100%)
+     * and values above it are capped at 100%, so with 50 a penetration of 10% becomes 20% and 50% becomes 100%.
+     * Only the value is mapped, the slider movement is not limited (that is what sliderMin/sliderMax do).
+     *
+     * @param penetration Penetration amount in the 0-1 range
+     * @return Mapped penetration amount in the 0-1 range, unchanged when 'fullyPenetratedAtValue' is not set
+     */
+    private float mapToFullyPenetrated(Float penetration)
+    {
+        if (fullyPenetratedAtValue == null)
+        {
+            return penetration;
+        }
+        return Math.clamp(penetration / (fullyPenetratedAtValue / 100f), 0f, 1f);
+    }
+
+    /** A value that cannot be used as a percentage (0 or less) disables the mapping (ConfigLoader warns about it). */
+    private static Float resolveFullyPenetratedAtValue(ConfigProperties config)
+    {
+        return config.fullyPenetratedAtValue() != null && config.fullyPenetratedAtValue() > 0
+                ? config.fullyPenetratedAtValue()
+                : null;
     }
 
     /**

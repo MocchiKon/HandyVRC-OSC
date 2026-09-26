@@ -92,6 +92,61 @@ class HspParameterProcessorTest
         assertThat(positions).containsExactly(75);
     }
 
+    @Test
+    void penetratorValueIsMappedToFullyPenetratedAtValue()
+    {
+        var processor = new HspParameterProcessor(ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .fullyPenetratedAtValue(50f)
+                .build());
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+
+        processor.actOnValueChange(0.125f); // 12.5% -> 25% penetration -> position 75
+        processor.actOnValueChange(0.25f); // 25% -> 50% penetration -> position 50
+        processor.actOnValueChange(0.5f); // 50% counts as fully penetrated (100%) -> position 0
+        processor.actOnValueChange(0.8f); // Above the configured value, capped at 100% -> position 0
+        processor.actOnValueChange(1.f);
+
+        assertThat(positions).containsExactly(75, 50, 0, 0, 0);
+    }
+
+    @Test
+    void unusableFullyPenetratedAtValueIsIgnored()
+    {
+        var processor = new HspParameterProcessor(ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .fullyPenetratedAtValue(0f)
+                .build());
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+
+        processor.actOnValueChange(0.25f);
+
+        assertThat(positions).containsExactly(75); // Value used as it is
+    }
+
+    @Test
+    void orificePenetrationIsMappedToFullyPenetratedAtValue()
+    {
+        var processor = new HspParameterProcessor(ConfigProperties.builder()
+                .spsType(SpsType.ORIFICE)
+                .fullyPenetratedAtValue(50f)
+                .build());
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+        for (int i = 0; i < 4; i++)
+        {
+            processor.actOnProximityChange(0.1f, 0.6f); // 0.5m long penetrator, length is trusted after a few samples
+        }
+        positions.clear();
+
+        processor.actOnProximityChange(0.625f, null); // Calculated penetration 25% -> mapped 50% -> position 50
+        processor.actOnProximityChange(0.75f, null); // Calculated penetration 50% -> mapped 100% -> position 0
+
+        assertThat(positions).containsExactly(50, 0);
+    }
+
     private static HspParameterProcessor orificeProcessor()
     {
         return new HspParameterProcessor(ConfigProperties.builder()

@@ -32,6 +32,7 @@ public record ConfigProperties(
         String penetratorTipParameter,
         Float sliderMin,
         Float sliderMax,
+        Float fullyPenetratedAtValue,
         SpsType spsType
 )
 {
@@ -68,6 +69,7 @@ public record ConfigProperties(
                 ", penetratorTipParameter='" + penetratorTipParameter + '\'' +
                 ", sliderMin=" + sliderMin +
                 ", sliderMax=" + sliderMax +
+                ", fullyPenetratedAtValue=" + fullyPenetratedAtValue +
                 ", spsType=" + spsType +
                 ']';
     }
