@@ -1,6 +1,7 @@
 package org.example.processor;
 
 import handy.model.DeviceModeValue;
+import org.example.TestDataSource;
 import org.example.config.ConfigProperties;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
@@ -266,6 +267,21 @@ class HdspSmoothedParameterProcessorTest
     }
 
     @Test
+    void orificeMovementDrivesTheSliderAsWell()
+    {
+        // In ORIFICE mode the movement arrives as the root/tip proximity of the penetrator, which does not go
+        // through actOnValueChange: without the raw value the speed measurement stays empty and nothing is sent
+        var harness = new Harness(ConfigProperties.builder()
+                .spsType(SpsType.ORIFICE)
+                .minimalValueChange(0)
+                .build());
+
+        harness.run(1500, t -> 0.5 - 0.5 * Math.cos(2 * Math.PI * t / 1500.0));
+
+        assertThat(harness.movingCalls()).isNotEmpty();
+    }
+
+    @Test
     void thresholdsFromConfigAreUsed()
     {
         var harness = new Harness(ConfigProperties.builder()
@@ -317,6 +333,7 @@ class HdspSmoothedParameterProcessorTest
         final HdspSmoothedParameterProcessor processor;
         private static final double startPosition = 0.5;
         private final long startTimeMs = 1_000_000;
+        private final boolean orifice;
         private long virtualTimeMs = startTimeMs;
         private double lastInputPosition;
         private long lastInputSentMs;
@@ -330,6 +347,7 @@ class HdspSmoothedParameterProcessorTest
         {
             this.client = new RecordingHandyClient(this);
             this.lastInputSentMs = virtualTimeMs; // The first value is fed on the first tick
+            this.orifice = config.spsType() == SpsType.ORIFICE;
             this.processor = new HdspSmoothedParameterProcessor(client, config)
             {
                 @Override
@@ -357,10 +375,20 @@ class HdspSmoothedParameterProcessorTest
             return startTimeMs;
         }
 
-        /** Feeds one input value (average of the interval that just passed, like a 20 values/s stream). */
+        /**
+         * Feeds one input value (average of the interval that just passed, like a 20 values/s stream). In ORIFICE
+         * mode the value is the insertion amount, which is turned into the root/tip proximity of a simulated
+         * penetrator the way the test data source does it.
+         */
         void feed(float position)
         {
             lastInputPosition = position;
+            if (orifice)
+            {
+                float rootProximity = 1.f - (1.f - position) * TestDataSource.SIMULATED_PENETRATOR_LENGTH;
+                processor.actOnProximityChange(rootProximity, rootProximity + TestDataSource.SIMULATED_PENETRATOR_LENGTH);
+                return;
+            }
             processor.actOnValueChange((float) (1.0 - position));
         }
 

@@ -228,6 +228,21 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     }
 
     /**
+     * In ORIFICE mode the movement arrives as the root proximity of the penetrator, which the base class turns
+     * into a point without going through {@link #actOnValueChange}. The value is needed for the speed measurement
+     * just like in PENETRATOR mode, so it is added to the input tracking here as well.
+     */
+    @Override
+    public void actOnProximityChange(Float rootProximity, Float tipProximity)
+    {
+        super.actOnProximityChange(rootProximity, tipProximity);
+        if (penetratorLengthDetector != null && rootProximity != null)
+        {
+            addSample(toDevicePosition(calculatePenetration(rootProximity)));
+        }
+    }
+
+    /**
      * Adds a point. Unlike the plain HDSP processor every value is fed to the input tracking as well, whether it
      * becomes a point or not.
      */
