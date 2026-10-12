@@ -5,7 +5,6 @@ import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.SliderSettingsResult;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -101,69 +100,6 @@ class HdspParameterProcessorTest
         assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
     }
 
-    /**
-     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
-     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
-     */
-    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
-    @Test
-    void deviceIsStoppedWhenPointsStopComing()
-    {
-        var client = new RecordingHandyClient();
-        var processor = processor(client);
-        processor.actOnValueChange(0.5f);
-        processor.trySendingMessage(0);
-
-        // Simulate that no new point was produced for longer than the idle timeout
-        processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
-        processor.trySendingMessage(0);
-
-        assertThat(client.hdspCalls).containsExactly(
-                new HdspCall(xp(50), 20, false),
-                new HdspCall(xp(50), 20, true));
-    }
-
-    /**
-     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
-     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
-     */
-    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
-    @Test
-    void stopIsSentOnlyOnce()
-    {
-        var client = new RecordingHandyClient();
-        var processor = processor(client);
-        processor.actOnValueChange(0.5f);
-        processor.trySendingMessage(0);
-        processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
-        processor.trySendingMessage(0);
-        processor.trySendingMessage(0);
-        processor.trySendingMessage(0);
-
-        assertThat(client.hdspCalls).hasSize(2);
-    }
-
-    /**
-     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
-     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
-     */
-    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
-    @Test
-    void pointAfterStopUsesTheSameIntervalAsTheFirstPoint()
-    {
-        var client = new RecordingHandyClient();
-        var processor = processor(client);
-        processor.actOnValueChange(0.5f);
-        processor.trySendingMessage(0);
-        processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
-        processor.trySendingMessage(0);
-
-        processor.actOnValueChange(0.2f); // Position 80
-        processor.trySendingMessage(0);
-
-        assertThat(client.hdspCalls.getLast()).isEqualTo(new HdspCall(xp(80), 20, false));
-    }
-
     @Test
     void aFreshMoveIsNotStoppedInstantlyEvenIfItsPointWaitedALongTime()
     {
@@ -177,30 +113,6 @@ class HdspParameterProcessorTest
         processor.trySendingMessage(0); // Would stop it immediately if the activity time was not refreshed
 
         assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
-    }
-
-    /**
-     * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
-     * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
-     */
-    @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
-    @Test
-    void pointAfterStopIsSentImmediately()
-    {
-        var client = new RecordingHandyClient();
-        var processor = processor(client);
-
-        processor.actOnValueChange(0.5f);
-        processor.trySendingMessage(0);
-        processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
-        processor.trySendingMessage(0); // Stop
-
-        processor.actOnValueChange(0.2f);
-        processor.trySendingMessage(0); // After a stop the point is sent right away
-
-        assertThat(client.hdspCalls).hasSize(3);
-        assertThat(client.hdspCalls.get(1).stopOnTarget()).isTrue();
-        assertThat(client.hdspCalls.get(2)).isEqualTo(new HdspCall(xp(80), 20, false));
     }
 
     @Test

@@ -19,9 +19,9 @@ public abstract class HandyClient implements AutoCloseable
      * The position is the normalized HDSP position in the 0.0-1.0 range of the configured stroke zone, which is
      * the unit the device protocol uses. The HDSP processor converts the percentage positions used in the rest
      * of the app before calling this, so an implementation only has to translate the command into its own wire
-     * format (the BLE protocol takes the position as it is).
+     * format (the BLE protocol takes the position as it is, Intiface sends it as a Buttplug LinearCmd).
      * <p>
-     * HDSP is only available over a direct Bluetooth connection. The default implementation rejects it.
+     * The default implementation rejects it.
      *
      * @param xp normalized position in the 0.0-1.0 range (relative to the configured stroke zone)
      * @param t time in milliseconds the device should take to reach the position
@@ -29,12 +29,12 @@ public abstract class HandyClient implements AutoCloseable
      */
     public HandyBaseResponseWithError hdspXpt(float xp, int t, boolean stopOnTarget)
     {
-        throw new UnsupportedOperationException("HDSP is only supported over a Bluetooth (BLE) connection");
+        throw new UnsupportedOperationException("HDSP is not supported by " + getClass().getSimpleName());
     }
 
     /**
      * Stops the HDSP move the slider is executing, so that it does not keep moving after the app stopped sending
-     * commands. Only the direct Bluetooth connection supports HDSP; the default implementation does nothing.
+     * commands. The default implementation does nothing.
      */
     public void hdspStop()
     {
@@ -50,8 +50,8 @@ public abstract class HandyClient implements AutoCloseable
     }
 
     /**
-     * Releases the resources the client holds (for example the reader thread that receives BLE responses).
-     * The default implementation does nothing.
+     * Disconnects from the device and releases the resources the client holds (for example the reader thread
+     * that receives BLE responses). The default implementation does nothing.
      */
     @Override
     public void close()

@@ -27,12 +27,12 @@ class RateLimitedLoggerTest
     @Test
     void summarizesTheOccurrencesSuppressedWithinTheInterval()
     {
-        var limiter = new RateLimitedLogger(logger, 60);
+        var limiter = new RateLimitedLogger(logger, 500);
 
         limiter.warn("first");
         limiter.warn("suppressed");
         limiter.warn("suppressed");
-        sleep(80);
+        sleep(600);
         limiter.warn("after the interval");
 
         assertThat(logged).containsExactly(

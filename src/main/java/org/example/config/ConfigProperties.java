@@ -5,14 +5,22 @@ import org.example.processor.HdspSmoothedParameterProcessor;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Locale;
+
 /**
  * Settings of the app. They are edited in the GUI and stored in app.properties (see {@link ConfigLoader}).
  * <p>
- * The Handy is always connected over Bluetooth and always driven with one of the HDSP algorithms.
+ * The device is driven with one of the HDSP algorithms, either over a direct Bluetooth connection or through
+ * Intiface Central (see {@link ConnectionType}).
  */
 @Builder(toBuilder = true)
 public record ConfigProperties(
         // Basic
+        ConnectionType connection,
+        // WebSocket address of the Intiface Central server, only used with the INTIFACE connection
+        String intifaceAddress,
         SpsType spsType,
         // Whose contacts move the device, selects the default avatar parameter
         InteractWith interactWith,
@@ -55,6 +63,7 @@ public record ConfigProperties(
     public static final float DEFAULT_FULLY_PENETRATED_AT_VALUE = 85f;
     public static final int DEFAULT_LISTEN_ON_PORT = 9001;
     public static final int DEFAULT_MINIMAL_VALUE_CHANGE = 3;
+    public static final String DEFAULT_INTIFACE_ADDRESS = "ws://127.0.0.1:12345";
 
     private static final String NEW_ROOT_SUFFIX = "NewRoot";
     private static final String NEW_TIP_SUFFIX = "NewTip";
@@ -63,6 +72,8 @@ public record ConfigProperties(
     public static ConfigProperties defaults()
     {
         return ConfigProperties.builder()
+                .connection(ConnectionType.DIRECT)
+                .intifaceAddress(DEFAULT_INTIFACE_ADDRESS)
                 .spsType(SpsType.PENETRATOR)
                 .interactWith(InteractWith.OTHERS)
                 .processingAlgorithm(ParameterProcessorType.HDSP_SMOOTHED)
@@ -142,10 +153,53 @@ public record ConfigProperties(
     }
 
     /**
+     * @return the WebSocket address of the Intiface Central server ('ws://' is added when the scheme is left out),
+     * or null when the address is not valid
+     */
+    public static URI intifaceUri(String address)
+    {
+        if (address == null || address.isBlank())
+        {
+            return null;
+        }
+        String trimmed = address.trim();
+        try
+        {
+            URI uri = new URI(trimmed.contains("://") ? trimmed : "ws://" + trimmed);
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            return (scheme.equals("ws") || scheme.equals("wss")) && uri.getHost() != null ? uri : null;
+        }
+        catch (URISyntaxException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * @return a message explaining why the app cannot connect to Intiface Central with this address, or null when
+     * it can
+     */
+    public static String validateIntifaceAddress(String address)
+    {
+        return intifaceUri(address) == null
+                ? "The Intiface address is not valid. Use the server address Intiface Central shows, for example "
+                        + DEFAULT_INTIFACE_ADDRESS + "."
+                : null;
+    }
+
+    /**
      * @return a message explaining why the app cannot run with these settings, or null when it can
      */
     public String validate()
     {
+        if (connection == ConnectionType.INTIFACE)
+        {
+            String error = validateIntifaceAddress(intifaceAddress);
+            if (error != null)
+            {
+                return error;
+            }
+        }
         return validateAvatarParameter(spsType, avatarParameter);
     }
 

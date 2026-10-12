@@ -26,7 +26,9 @@ public class HandyClientBle extends HandyClient
     @Override
     public void close()
     {
+        // Fails the requests that still wait for a response before the connection goes away
         rpc.close();
+        ble.disconnect();
     }
 
     @Override

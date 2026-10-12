@@ -1,6 +1,7 @@
 package org.example.gui;
 
 import org.example.config.ConfigProperties;
+import org.example.config.ConnectionType;
 import org.example.config.InteractWith;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
@@ -34,6 +35,11 @@ public class SettingsPanel extends JPanel
     private boolean updating;
 
     // Basic
+    private final SegmentedControl<ConnectionType> connection;
+    private final WrappingText connectionHint = new WrappingText("", Theme.regular(12f), Theme.TEXT_MUTED);
+    private final ModernTextField intifaceAddress = new ModernTextField("", 20);
+    private final WrappingText intifaceAddressError = new WrappingText("", Theme.regular(12f), Theme.ERROR);
+    private JPanel intifaceAddressRow;
     private final SegmentedControl<SpsType> spsType;
     private final SegmentedControl<InteractWith> interactWith;
     private final SegmentedControl<ParameterProcessorType> algorithm;
@@ -86,6 +92,15 @@ public class SettingsPanel extends JPanel
         this.changeListener = changeListener;
         setOpaque(false);
 
+        connection = new SegmentedControl<>(List.of(
+                new SegmentedControl.Option<>(ConnectionType.DIRECT, ConnectionType.DIRECT.getLabel(),
+                        "Recommended. The app connects to your Handy over Bluetooth itself. Lowest latency, and the"
+                                + " stroke range is set on the device."),
+                new SegmentedControl.Option<>(ConnectionType.INTIFACE, ConnectionType.INTIFACE.getLabel(),
+                        "The app sends the movement to Intiface Central, which connects to the device. Start"
+                                + " Intiface Central and its server before pressing Start. Other strokers Intiface"
+                                + " supports might work as well, but only the Handy is tested.")),
+                initialConfig.connection(), false);
         spsType = new SegmentedControl<>(List.of(
                 new SegmentedControl.Option<>(SpsType.PENETRATOR, "Penetrator",
                         "Your avatar has an SPS penetrator. The device follows how deep it is inside an orifice."),
@@ -144,6 +159,9 @@ public class SettingsPanel extends JPanel
         updating = true;
         try
         {
+            connection.setSelected(newConfig.connection());
+            intifaceAddress.setText(newConfig.intifaceAddress());
+            intifaceAddress.setCaretPosition(0);
             spsType.setSelected(newConfig.spsType());
             interactWith.setSelected(newConfig.interactWith());
             algorithm.setSelected(newConfig.processingAlgorithm());
@@ -200,6 +218,16 @@ public class SettingsPanel extends JPanel
     /** Updates everything that depends on other settings (visible options, defaults, validation). */
     private void refreshDependentControls()
     {
+        boolean intiface = config.connection() == ConnectionType.INTIFACE;
+        connectionHint.setText(intiface
+                ? "Start Intiface Central and its server before pressing Start."
+                : "Recommended: connects to your Handy over Bluetooth.");
+        intifaceAddressRow.setVisible(intiface);
+        String addressError = intiface ? ConfigProperties.validateIntifaceAddress(config.intifaceAddress()) : null;
+        intifaceAddressError.setText(addressError == null ? "" : addressError);
+        intifaceAddressError.setVisible(addressError != null);
+        intifaceAddress.setInvalid(addressError != null);
+
         boolean smoothed = config.processingAlgorithm() == ParameterProcessorType.HDSP_SMOOTHED;
         smoothedSection.setVisible(smoothed);
         directSection.setVisible(!smoothed);
@@ -237,6 +265,8 @@ public class SettingsPanel extends JPanel
 
     private void installListeners()
     {
+        connection.setSelectionListener(value -> update(b -> b.connection(value)));
+        onTextChange(intifaceAddress, () -> update(b -> b.intifaceAddress(intifaceAddress.getText().trim())));
         spsType.setSelectionListener(value -> update(b -> b.spsType(value)
                 .avatarParameter(customAvatarParameter.isSelected() ? config.avatarParameter()
                         : ConfigProperties.defaultAvatarParameter(value, config.interactWith()))));
@@ -327,6 +357,41 @@ public class SettingsPanel extends JPanel
     {
         var page = pageContainer();
 
+        var device = section("Device");
+        var connectionRow = verticalRow();
+        connectionRow.add(title("Connection"));
+        connectionRow.add(Box.createVerticalStrut(8));
+        connectionRow.add(connection);
+        connectionRow.add(Box.createVerticalStrut(6));
+        connectionRow.add(connectionHint);
+        for (Component component : connectionRow.getComponents())
+        {
+            ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        applyTooltip(connectionRow, Theme.tooltip("How the app reaches your device.\n\n" + connection.describeOptions()));
+        addRow(device, connectionRow);
+        intifaceAddress.setFont(Theme.font(Font.PLAIN, 12.5f));
+        intifaceAddressError.setVisible(false);
+        // The row brings its own gap instead of using addRow, so that nothing is left over while it is hidden
+        intifaceAddressRow = verticalRow();
+        intifaceAddressRow.add(Box.createVerticalStrut(12));
+        intifaceAddressRow.add(title("Intiface address"));
+        intifaceAddressRow.add(Box.createVerticalStrut(8));
+        intifaceAddressRow.add(intifaceAddress);
+        intifaceAddressRow.add(Box.createVerticalStrut(6));
+        intifaceAddressRow.add(intifaceAddressError);
+        for (Component component : intifaceAddressRow.getComponents())
+        {
+            ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        applyTooltip(intifaceAddressRow, Theme.tooltip("Address of the Intiface Central server, as Intiface Central"
+                + " shows it. " + ConfigProperties.DEFAULT_INTIFACE_ADDRESS + " unless you changed the server port"
+                + " there."));
+        intifaceAddressRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        device.add(intifaceAddressRow);
+        page.add(device);
+        page.add(Box.createVerticalStrut(12));
+
         var avatar = section("Avatar");
         addRow(avatar, controlRow("SPS type",
                 "Which SPS component of your avatar moves the device: your own penetrator, or the orifice someone"
@@ -402,6 +467,8 @@ public class SettingsPanel extends JPanel
         page.add(osc);
         page.add(Box.createVerticalStrut(12));
         page.add(restoreDefaultsButton(defaults -> config.toBuilder()
+                .connection(defaults.connection())
+                .intifaceAddress(defaults.intifaceAddress())
                 .spsType(defaults.spsType())
                 .interactWith(defaults.interactWith())
                 .processingAlgorithm(defaults.processingAlgorithm())
@@ -455,7 +522,8 @@ public class SettingsPanel extends JPanel
                 reversalMinDistance, value -> "%.1f%%".formatted(value / 10f)));
         addRow(smoothedSection, toggleRow("Log device position", "Diagnostics, leave off for normal use",
                 "Logs the position the device reports (log level DEBUG) every 200 ms next to the position the app"
-                        + " believes it is at. Every report is an extra Bluetooth request.",
+                        + " believes it is at. Every report is an extra Bluetooth request. Direct connection only:"
+                        + " Intiface cannot report the position.",
                 logDevicePosition));
         page.add(smoothedSection);
 
@@ -473,7 +541,7 @@ public class SettingsPanel extends JPanel
         var general = section("General");
         addRow(general, sliderRow("Send interval",
                 "Minimum time between two commands sent to the device. At least 20 ms are always kept to not flood"
-                        + " the Bluetooth connection. In Smoothed mode this only spaces out speed corrections, stops"
+                        + " the device connection. In Smoothed mode this only spaces out speed corrections, stops"
                         + " are always sent right away.",
                 sendMessageEvery, value -> value <= 20 ? "20 ms (minimum)" : value + " ms"));
         addRow(general, toggleRow("Check for updates", "Look for a new version on startup",

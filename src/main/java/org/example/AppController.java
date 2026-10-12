@@ -2,8 +2,11 @@ package org.example;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
+import org.example.config.ConnectionType;
 import org.example.handy.ble.HandyBleAdapter;
 import org.example.handy.ble.HandyClientBle;
+import org.example.handy.common.HandyClient;
+import org.example.handy.intiface.HandyClientIntiface;
 import org.example.oscquery.OscQueryService;
 import org.example.oscquery.OscQueryServiceProfile;
 import org.example.oscquery.VrchatParameterScanner;
@@ -13,6 +16,7 @@ import org.example.processor.ParameterProcessor;
 import org.example.processor.SpsType;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,15 +25,17 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /**
- * Starts and stops the app on request of the GUI: connects the Handy over Bluetooth, opens the OSC port (announced
+ * Starts and stops the app on request of the GUI: connects the device (directly over Bluetooth or through Intiface
+ * Central), opens the OSC port (announced
  * to VRChat over OSCQuery), and runs the processor that turns the avatar parameters into device commands.
  * <p>
  * In test mode the avatar parameters do not come from VRChat but from the GUI ({@link #feedTestInput}), so the
  * mode and the connection to the device can be tried out without VRChat.
  * <p>
  * Every operation runs on one background thread, in the order it was requested, so the GUI never blocks (scanning
- * for the device can take several seconds) and two operations can never interfere with each other. The Bluetooth
- * connection is kept when the app is stopped or restarted with new settings, so applying a setting is quick.
+ * for the device can take several seconds) and two operations can never interfere with each other. The device
+ * connection is kept when the app is stopped or restarted with new settings (unless the connection settings
+ * changed), so applying a setting is quick.
  */
 @Slf4j
 public class AppController implements AutoCloseable
@@ -70,8 +76,9 @@ public class AppController implements AutoCloseable
     private volatile Status status = new Status(State.STOPPED, "");
 
     // Only used on the worker thread (volatile for the shutdown hook)
-    private volatile HandyBleAdapter ble;
-    private volatile HandyClientBle client;
+    private volatile HandyClient client;
+    /** How the connected device was connected, so that a change of the connection settings reconnects it. */
+    private DeviceConnection connectedWith;
     private boolean shutdownHookRegistered;
     private OscEndpoint osc;
     private ParameterProcessor processor;
@@ -160,7 +167,10 @@ public class AppController implements AutoCloseable
         return 1f - (1f - depth) * TEST_PENETRATOR_LENGTH;
     }
 
-    /** Applies new settings: a running session is restarted with them, the Bluetooth connection is kept. */
+    /**
+     * Applies new settings: a running session is restarted with them. The device connection is kept unless the
+     * connection settings changed.
+     */
     public void restart(ConfigProperties config)
     {
         worker.execute(() ->
@@ -219,12 +229,15 @@ public class AppController implements AutoCloseable
         }
         try
         {
-            if (!isDeviceConnected())
+            DeviceConnection connection = DeviceConnection.of(config);
+            if (!isDeviceConnected() || !connection.equals(connectedWith))
             {
-                setStatus(State.CONNECTING, "Searching for your Handy over Bluetooth...");
-                connectDevice();
+                setStatus(State.CONNECTING, connection.type() == ConnectionType.INTIFACE
+                        ? "Connecting to Intiface Central at %s...".formatted(connection.intifaceUri())
+                        : "Searching for your Handy over Bluetooth...");
+                connectDevice(connection);
             }
-            setStatus(State.CONNECTING, "Preparing your Handy...");
+            setStatus(State.CONNECTING, "Preparing your device...");
             processor = switch (config.processingAlgorithm())
             {
                 case HDSP -> new HdspParameterProcessor(client, config);
@@ -294,20 +307,35 @@ public class AppController implements AutoCloseable
     {
         if (status.state() == State.RUNNING && !isDeviceConnected())
         {
-            log.error("Lost the Bluetooth connection to the Handy");
+            log.error(connectedWith != null && connectedWith.type() == ConnectionType.INTIFACE
+                    ? "Lost the connection to Intiface Central or the device"
+                    : "Lost the Bluetooth connection to the Handy");
             stopSession(true);
-            setStatus(State.ERROR, "Lost the connection to your Handy. Press Start to reconnect.");
+            setStatus(State.ERROR, "Lost the connection to your device. Press Start to reconnect.");
         }
     }
 
     private boolean isDeviceConnected()
     {
-        return client != null && ble != null && ble.isConnected();
+        HandyClient current = client;
+        return current != null && current.checkConnectionStatus();
     }
 
-    private void connectDevice()
+    private void connectDevice(DeviceConnection connection) throws IOException
     {
-        disconnectDevice(); // A connection that was lost is replaced by a new one
+        disconnectDevice(); // A connection that was lost (or uses other settings) is replaced by a new one
+        client = switch (connection.type())
+        {
+            case DIRECT -> connectBluetooth();
+            case INTIFACE -> HandyClientIntiface.connect(connection.intifaceUri());
+        };
+        connectedWith = connection;
+        log.info("Device connected ({})", connection.type().getLabel());
+        registerShutdownHook();
+    }
+
+    private static HandyClient connectBluetooth()
+    {
         boolean bluetoothEnabled;
         try
         {
@@ -321,35 +349,27 @@ public class AppController implements AutoCloseable
         {
             throw new IllegalStateException("Bluetooth is turned off. Turn it on and press Start again.");
         }
-        var newBle = new HandyBleAdapter();
-        newBle.connect();
-        ble = newBle;
-        client = new HandyClientBle(newBle);
+        var ble = new HandyBleAdapter();
+        ble.connect();
         log.info("Handy connected via BLE...");
-        registerShutdownHook();
+        return new HandyClientBle(ble);
     }
 
     private void disconnectDevice()
     {
-        HandyClientBle oldClient = client;
-        HandyBleAdapter oldBle = ble;
+        HandyClient oldClient = client;
         client = null;
-        ble = null;
+        connectedWith = null;
         try
         {
             if (oldClient != null)
             {
-                // Fails the requests that still wait for a response before the connection goes away
                 oldClient.close();
-            }
-            if (oldBle != null)
-            {
-                oldBle.disconnect();
             }
         }
         catch (Exception e)
         {
-            log.warn("Error while disconnecting BLE: {}", e.getMessage());
+            log.warn("Error while disconnecting the device: {}", e.getMessage());
         }
     }
 
@@ -363,13 +383,13 @@ public class AppController implements AutoCloseable
         shutdownHookRegistered = true;
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
         {
-            if (ble == null)
+            if (client == null)
             {
                 return;
             }
-            log.info("Shutdown hook: disconnecting BLE...");
+            log.info("Shutdown hook: disconnecting the device...");
             disconnectDevice();
-        }, "BLE-Shutdown-thread"));
+        }, "Device-Shutdown-thread"));
     }
 
     /**
@@ -455,6 +475,21 @@ public class AppController implements AutoCloseable
             cause = cause.getCause();
         }
         return cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+    }
+
+    /**
+     * The settings a device connection is made with.
+     *
+     * @param intifaceUri address of Intiface Central, null for a direct connection
+     */
+    private record DeviceConnection(ConnectionType type, URI intifaceUri)
+    {
+        static DeviceConnection of(ConfigProperties config)
+        {
+            ConnectionType type = config.connection() != null ? config.connection() : ConnectionType.DIRECT;
+            return new DeviceConnection(type,
+                    type == ConnectionType.INTIFACE ? ConfigProperties.intifaceUri(config.intifaceAddress()) : null);
+        }
     }
 
     /**

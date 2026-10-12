@@ -1,3 +1,6 @@
 # The Maven wrapper scripts only run with their own platform's line endings, whatever the checkout uses
 mvnw text eol=lf
 mvnw.cmd text eol=crlf
+# The release start scripts, same reason
+src/main/packaging/start.sh text eol=lf
+src/main/packaging/start.bat text eol=crlf

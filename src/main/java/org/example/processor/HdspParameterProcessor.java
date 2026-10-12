@@ -14,8 +14,8 @@ import java.util.Optional;
 
 /**
  * HDSP (Handy Direct Streaming Protocol) processor. HDSP has no device-side scheduling: the newest position
- * is sent together with the time the device should take to reach it (an XPT command). Because of that it is a best-effort, low-latency protocol that only makes sense over a direct Bluetooth
- * connection.
+ * is sent together with the time the device should take to reach it (an XPT command). Because of that it is a best-effort, low-latency protocol that works best over a direct Bluetooth
+ * connection (through Intiface every move is sent as a Buttplug LinearCmd).
  * <p>
  * The positions used inside the app are percentages (0-100), but HDSP works with normalized positions
  * (0.0-1.0 of the configured stroke zone). The conversion is done here, before the command is handed to a

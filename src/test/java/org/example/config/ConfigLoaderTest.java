@@ -323,6 +323,57 @@ class ConfigLoaderTest
         assertThat(ConfigLoader.format(ConfigProperties.defaults())).contains("\navatarParameter=\n");
     }
 
+    @Test
+    void connectsDirectlyByDefault() throws IOException
+    {
+        var config = loadConfig("spsType=PENETRATOR");
+
+        assertThat(config.connection()).isEqualTo(ConnectionType.DIRECT);
+        assertThat(config.intifaceAddress()).isEqualTo(ConfigProperties.DEFAULT_INTIFACE_ADDRESS);
+    }
+
+    @Test
+    void readsIntifaceConnection() throws IOException
+    {
+        var config = loadConfig("""
+                connection=intiface
+                intifaceAddress=ws://192.168.1.20:12345
+                """);
+
+        assertThat(config.connection()).isEqualTo(ConnectionType.INTIFACE);
+        assertThat(config.intifaceAddress()).isEqualTo("ws://192.168.1.20:12345");
+        assertThat(config.validate()).isNull();
+    }
+
+    @Test
+    void invalidIntifaceAddressIsOnlyReportedWithTheIntifaceConnection() throws IOException
+    {
+        assertThat(loadConfig("connection=INTIFACE\nintifaceAddress=http://localhost:12345").validate()).contains("Intiface address");
+        assertThat(loadConfig("connection=DIRECT\nintifaceAddress=http://localhost:12345").validate()).isNull();
+    }
+
+    @Test
+    void intifaceAddressWithoutSchemeUsesWebSocket()
+    {
+        assertThat(ConfigProperties.intifaceUri("127.0.0.1:12345")).hasToString("ws://127.0.0.1:12345");
+        assertThat(ConfigProperties.intifaceUri("wss://example.org:443")).hasToString("wss://example.org:443");
+        assertThat(ConfigProperties.intifaceUri(" ")).isNull();
+    }
+
+    @Test
+    void writesAndReadsBackTheConnection() throws IOException
+    {
+        var config = ConfigProperties.defaults().toBuilder()
+                .connection(ConnectionType.INTIFACE)
+                .intifaceAddress("ws://localhost:1234")
+                .build();
+
+        var reread = loadConfig(ConfigLoader.format(config));
+
+        assertThat(reread.connection()).isEqualTo(ConnectionType.INTIFACE);
+        assertThat(reread.intifaceAddress()).isEqualTo("ws://localhost:1234");
+    }
+
     private ConfigProperties loadConfig(String configContent) throws IOException
     {
         Path configPath = Files.createTempFile("app", ".properties");

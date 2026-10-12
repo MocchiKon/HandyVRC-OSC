@@ -74,6 +74,7 @@ public class ConfigLoader
     {
         ConfigProperties defaults = ConfigProperties.defaults();
 
+        ConnectionType connection = getEnum(properties, "connection", ConnectionType.class, defaults.connection());
         SpsType spsType = getEnum(properties, "spsType", SpsType.class, defaults.spsType());
         InteractWith interactWith = getEnum(properties, "interactWith", InteractWith.class, defaults.interactWith());
         ParameterProcessorType processingAlgorithm = getProperty(properties, "processingAlgorithm")
@@ -93,6 +94,8 @@ public class ConfigLoader
         }
 
         return ConfigProperties.builder()
+                .connection(connection)
+                .intifaceAddress(getProperty(properties, "intifaceAddress").orElse(defaults.intifaceAddress()))
                 .spsType(spsType)
                 .interactWith(interactWith)
                 .processingAlgorithm(processingAlgorithm)
@@ -172,6 +175,10 @@ public class ConfigLoader
 
                 """);
         section(out, "Basic");
+        entry(out, "connection", config.connection(),
+                "DIRECT (default, recommended: the app connects to the Handy over Bluetooth) or INTIFACE (through Intiface Central).");
+        entry(out, "intifaceAddress", config.intifaceAddress(),
+                "WebSocket address of the Intiface Central server. Only used when connection=INTIFACE.");
         entry(out, "spsType", config.spsType(),
                 "PENETRATOR or ORIFICE: which SPS component of your avatar moves the device.");
         entry(out, "interactWith", config.interactWith(),

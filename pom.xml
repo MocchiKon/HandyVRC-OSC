@@ -6,7 +6,7 @@
 
     <groupId>org.example</groupId>
     <artifactId>HandyVRC-OSC</artifactId>
-    <version>0.0.1</version>
+    <version>1.0</version>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -238,7 +238,7 @@
             Release packaging, run with: mvn package -PpackageForRelease
             Creates in target/, each with a HandyVRC-OSC folder and the default app.properties inside:
               HandyVRC-OSC-<version>-windows.zip        HandyVRC-OSC.exe with the bundled Windows JRE
-              HandyVRC-OSC-<version>-all-platforms.zip  HandyVRC-OSC.jar, needs Java 21+ installed
+              HandyVRC-OSC-<version>-all-platforms.zip  HandyVRC-OSC.jar with start.bat/start.sh, needs Java 21+ installed
         -->
         <profile>
             <id>packageForRelease</id>
