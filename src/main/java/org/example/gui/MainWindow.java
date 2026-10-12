@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.AppController;
 import org.example.config.ConfigLoader;
 import org.example.config.ConfigProperties;
+import org.example.processor.SpsType;
 import org.example.update.AppVersionProvider;
 
 import javax.swing.*;
@@ -345,13 +346,24 @@ public class MainWindow
         controller.startTest(config);
     }
 
-    /** The settings, with the SPS type of the test mode window while it is open. */
+    /**
+     * The settings, with the SPS type of the test mode window while it is open. Test mode does not listen for OSC,
+     * so the avatar parameter is replaced by the default of that SPS type: the configured one may belong to the
+     * other type (a penetrator parameter is rejected in Orifice mode).
+     */
     private ConfigProperties effectiveConfig()
     {
         ConfigProperties config = settings.getConfig();
-        return testWindow != null && !testWindow.isClosed()
-                ? config.toBuilder().spsType(testWindow.getMovedPart()).build()
-                : config;
+        if (testWindow == null || testWindow.isClosed())
+        {
+            return config;
+        }
+        SpsType part = testWindow.getMovedPart();
+        return config.toBuilder()
+                .spsType(part)
+                .avatarParameter(ConfigProperties.defaultAvatarParameter(part, config.interactWith()))
+                .customAvatarParameter(false)
+                .build();
     }
 
     private JComponent buildFooter()
