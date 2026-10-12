@@ -381,9 +381,9 @@ public class MainWindow
         {
             case STOPPED, ERROR -> start();
             case RUNNING -> controller.stop();
-            case CONNECTING ->
+            case CONNECTING, STOPPING ->
             {
-                // The button is disabled while connecting
+                // The button is disabled while connecting or stopping
             }
         }
     }
@@ -461,7 +461,8 @@ public class MainWindow
                 testWindow = null;
             }
         }
-        testModeButton.setEnabled(newStatus.state() != AppController.State.CONNECTING);
+        testModeButton.setEnabled(newStatus.state() != AppController.State.CONNECTING
+                && newStatus.state() != AppController.State.STOPPING);
         gauge.setActive(newStatus.state() == AppController.State.RUNNING);
         showMessage(newStatus.message(), newStatus.state() == AppController.State.ERROR);
 
@@ -478,6 +479,14 @@ public class MainWindow
             {
                 startStopButton.setText("Starting...");
                 startStopButton.setGlyph(ModernButton.Glyph.NONE);
+                startStopButton.setEnabled(false);
+            }
+            case STOPPING ->
+            {
+                // The device is being stopped, which can take a few seconds: no second click may start it again
+                startStopButton.setText("Stopping...");
+                startStopButton.setGlyph(ModernButton.Glyph.NONE);
+                startStopButton.setStyle(ModernButton.Style.SECONDARY);
                 startStopButton.setEnabled(false);
             }
             case RUNNING ->

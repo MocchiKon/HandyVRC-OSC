@@ -30,7 +30,8 @@ public class StatusPill extends JComponent
     {
         this.state = state;
         this.testMode = testMode;
-        if (state == AppController.State.CONNECTING || state == AppController.State.RUNNING)
+        if (state == AppController.State.CONNECTING || state == AppController.State.RUNNING
+                || state == AppController.State.STOPPING)
         {
             pulseTimer.start();
         }
@@ -49,6 +50,7 @@ public class StatusPill extends JComponent
             case STOPPED -> "Stopped";
             case CONNECTING -> "Connecting";
             case RUNNING -> testMode ? "Test mode" : "Running";
+            case STOPPING -> "Stopping";
             case ERROR -> "Error";
         };
     }
@@ -58,7 +60,7 @@ public class StatusPill extends JComponent
         return switch (state)
         {
             case STOPPED -> Theme.TEXT_MUTED;
-            case CONNECTING -> Theme.ACCENT_LIGHT;
+            case CONNECTING, STOPPING -> Theme.ACCENT_LIGHT;
             case RUNNING -> Theme.ACCENT;
             case ERROR -> Theme.ERROR;
         };
@@ -92,7 +94,8 @@ public class StatusPill extends JComponent
         float dot = 8;
         float dotX = 13;
         float dotY = height / 2f - dot / 2;
-        if (state == AppController.State.CONNECTING || state == AppController.State.RUNNING)
+        if (state == AppController.State.CONNECTING || state == AppController.State.RUNNING
+                || state == AppController.State.STOPPING)
         {
             float ring = dot + 10 * pulse;
             g.setColor(Theme.withAlpha(dotColor(), (int) (140 * (1 - pulse))));

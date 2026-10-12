@@ -202,7 +202,8 @@ class TestModeWindow
         boolean failed = status.state() == AppController.State.ERROR;
         stopButton.setText(failed ? "Retry" : "Stop test");
         stopButton.setStyle(failed ? ModernButton.Style.PRIMARY : ModernButton.Style.SECONDARY);
-        stopButton.setEnabled(status.state() != AppController.State.CONNECTING);
+        stopButton.setEnabled(status.state() != AppController.State.CONNECTING
+                && status.state() != AppController.State.STOPPING);
         if (status.state() == AppController.State.RUNNING)
         {
             lastSent = Float.NaN; // A new session starts from scratch, so the current depth is sent again

@@ -49,7 +49,7 @@ public class AppController implements AutoCloseable
 
     public enum State
     {
-        STOPPED, CONNECTING, RUNNING, ERROR
+        STOPPED, CONNECTING, RUNNING, STOPPING, ERROR
     }
 
     /**
@@ -187,6 +187,12 @@ public class AppController implements AutoCloseable
 
     public void stop()
     {
+        // Stopping the device can take a few seconds, so the status changes right away (the GUI disables the button
+        // and shows that the app is working on it) instead of when the worker has finished.
+        if (status.state() == State.RUNNING)
+        {
+            setStatus(State.STOPPING, "Stopping...");
+        }
         worker.execute(() ->
         {
             stopSession(true);
