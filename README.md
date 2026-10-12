@@ -46,6 +46,7 @@ but they are **not tested**.
 * Use **Direct** connection mode instead of Intiface if you can (TheHandy only).
 * Use the **full stroke range** if you can. A very short range makes slow movements hard for the Handy.
 * Perform movements towards the base, positioning during act is very important due to how SPS works.
+* If **Smoothed** mode does not work well for you then try **Direct**.
 
 ## Something doesn't work?
 
