@@ -67,7 +67,7 @@ public class AppController implements AutoCloseable
     private final Consumer<Status> statusListener;
     private final IntConsumer positionListener;
 
-    private volatile Status status = new Status(State.STOPPED, "Press Start to connect to your Handy");
+    private volatile Status status = new Status(State.STOPPED, "");
 
     // Only used on the worker thread (volatile for the shutdown hook)
     private volatile HandyBleAdapter ble;

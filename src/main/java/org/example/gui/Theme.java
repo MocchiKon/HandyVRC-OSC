@@ -62,7 +62,7 @@ public final class Theme
      * Every font size of the GUI is multiplied by this, so the text size can be tuned in one place. The sizes in the
      * code are the compact design sizes, which were too small to read comfortably.
      */
-    public static final float FONT_SCALE = 1.45f;
+    public static final float FONT_SCALE = 1.0f;
 
     public static Font font(int style, float size)
     {

@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class PositionGauge extends JComponent
 {
-    private static final int BAR_WIDTH = 46;
+    private static final int BAR_WIDTH = 40;
 
     /** Penetration value, 0 = top of the stroke, 100 = bottom. */
     private final AtomicInteger target = new AtomicInteger(0);
@@ -72,10 +72,9 @@ public class PositionGauge extends JComponent
         {
             return new Dimension(140, 300);
         }
-        // Caption, big number and hint stacked, as painted below
-        int height = getFontMetrics(Theme.bold(11f)).getHeight() + getFontMetrics(Theme.bold(64f)).getAscent()
-                + getFontMetrics(Theme.regular(12f)).getHeight() + 16;
-        return new Dimension(260, Math.max(150, height));
+        // Caption and big number stacked, as painted below
+        int height = getFontMetrics(Theme.bold(11f)).getHeight() + getFontMetrics(Theme.bold(64f)).getAscent() + 12;
+        return new Dimension(240, Math.max(120, height));
     }
 
     @Override
@@ -107,12 +106,6 @@ public class PositionGauge extends JComponent
         // The ascent includes room for accents that digits do not have, hence the small overlap
         int valueBaseline = captionBaseline + big.getAscent() - big.getAscent() / 10;
         g.drawString(value, textX - 3, valueBaseline);
-
-        g.setFont(Theme.regular(12f));
-        g.setColor(Theme.TEXT_MUTED);
-        FontMetrics small = g.getFontMetrics();
-        g.drawString("0 = top of the stroke  ·  100 = bottom", textX,
-                Math.min(height - small.getDescent() - 2, valueBaseline + small.getHeight() + 6));
         g.dispose();
     }
 

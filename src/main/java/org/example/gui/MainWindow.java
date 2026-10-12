@@ -33,8 +33,6 @@ public class MainWindow
     private final PositionGauge gauge = new PositionGauge();
     private final StatusPill statusPill = new StatusPill();
     private final WrappingText statusMessage = new WrappingText("", Theme.regular(12.5f), Theme.TEXT_SECONDARY);
-    private final WrappingText pendingChanges = new WrappingText("Settings changed. Apply them to use them now.",
-            Theme.bold(12f), Theme.ACCENT_LIGHT);
     private final ModernButton startStopButton = new ModernButton("Start", ModernButton.Style.PRIMARY);
     private final ModernButton applyButton = new ModernButton("Apply changes", ModernButton.Style.PRIMARY);
     private final ModernButton testModeButton = new ModernButton("Test mode", ModernButton.Style.SECONDARY);
@@ -91,8 +89,8 @@ public class MainWindow
 
         frame.setContentPane(buildContent());
         Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
-        frame.setSize(Math.min(700, screen.width), Math.min(1060, screen.height - 20));
-        frame.setMinimumSize(new Dimension(560, 620));
+        frame.setSize(Math.min(640, screen.width), Math.min(960, screen.height - 20));
+        frame.setMinimumSize(new Dimension(520, 580));
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
         startStopButton.requestFocusInWindow();
@@ -190,16 +188,6 @@ public class MainWindow
         constraints.anchor = GridBagConstraints.NORTHEAST;
         hero.add(corner, constraints);
 
-        pendingChanges.setVisible(false);
-        var messages = new JPanel();
-        messages.setOpaque(false);
-        messages.setLayout(new BoxLayout(messages, BoxLayout.Y_AXIS));
-        messages.add(statusMessage);
-        messages.add(Box.createVerticalStrut(4));
-        messages.add(pendingChanges);
-        statusMessage.setAlignmentX(Component.LEFT_ALIGNMENT);
-        pendingChanges.setAlignmentX(Component.LEFT_ALIGNMENT);
-
         constraints.gridx = 0;
         constraints.gridy = 1;
         constraints.gridwidth = 2;
@@ -207,7 +195,7 @@ public class MainWindow
         constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.anchor = GridBagConstraints.WEST;
         constraints.insets = new Insets(14, 0, 0, 0);
-        hero.add(messages, constraints);
+        hero.add(statusMessage, constraints);
 
         startStopButton.addActionListener(e -> onStartStop());
         applyButton.setGlyph(ModernButton.Glyph.REFRESH);
@@ -495,6 +483,7 @@ public class MainWindow
     {
         statusMessage.setForeground(error ? Theme.ERROR : Theme.TEXT_SECONDARY);
         statusMessage.setText(message);
+        statusMessage.setVisible(message != null && !message.isEmpty());
     }
 
     private void updatePendingChanges()
@@ -503,7 +492,6 @@ public class MainWindow
         boolean pending = status.state() == AppController.State.RUNNING && appliedConfig != null
                 && !appliedConfig.toBuilder().logLevel(null).build()
                         .equals(effectiveConfig().toBuilder().logLevel(null).build());
-        pendingChanges.setVisible(pending);
         applyButton.setVisible(pending);
     }
 
