@@ -108,7 +108,15 @@ final class SettingRows
         {
             ((JComponent) child).setAlignmentX(Component.LEFT_ALIGNMENT);
         }
-        var row = new JPanel(new BorderLayout(12, 0));
+        var row = new JPanel(new BorderLayout(12, 0))
+        {
+            @Override
+            public Dimension getMaximumSize()
+            {
+                // Without this, a card taller than its rows stretches this row and the switch floats in the gap
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
         row.setOpaque(false);
         row.add(texts, BorderLayout.CENTER);
         var toggleHolder = new JPanel(new GridBagLayout());
