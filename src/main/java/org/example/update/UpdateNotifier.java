@@ -1,10 +1,13 @@
 package org.example.update;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.gui.UpdateDialog;
 
 import javax.swing.*;
 import java.awt.*;
 import java.net.URI;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Tells the user that a newer version has been released: it is written to the log and, when the app runs with a
@@ -15,9 +18,6 @@ import java.net.URI;
 @Slf4j
 public final class UpdateNotifier
 {
-    private static final String OPEN_DOWNLOAD_PAGE = "Open download page";
-    private static final String CLOSE = "Close";
-
     private UpdateNotifier()
     {
     }
@@ -28,24 +28,10 @@ public final class UpdateNotifier
         log.warn("A newer version of HandyVRC-OSC is available: {} (this build is {}). Download it from {} "
                         + "(turn off 'Check for updates' in the Advanced settings to stop this check)",
                 result.latestVersion(), result.currentVersion(), downloadUrl);
-        showDialogSafely(notificationMessage(result), downloadUrl);
+        showDialogSafely(result);
     }
 
-    static String notificationMessage(UpdateCheckResult result)
-    {
-        return """
-                A newer version of HandyVRC-OSC is available.
-
-                Newest version: %s
-                Your version: %s
-
-                %s
-
-                You can turn this startup check off with 'Check for updates' in the Advanced settings."""
-                .formatted(result.latestVersion(), result.currentVersion(), result.downloadUrl());
-    }
-
-    private static void showDialogSafely(String message, String downloadUrl)
+    private static void showDialogSafely(UpdateCheckResult result)
     {
         try
         {
@@ -54,7 +40,7 @@ public final class UpdateNotifier
                 log.info("No graphical environment available, the update notification is only logged");
                 return;
             }
-            SwingUtilities.invokeLater(() -> showDialog(message, downloadUrl));
+            SwingUtilities.invokeLater(() -> showDialog(result));
         }
         catch (Exception e) // e.g. a broken AWT implementation
         {
@@ -63,17 +49,13 @@ public final class UpdateNotifier
         }
     }
 
-    private static void showDialog(String message, String downloadUrl)
+    private static void showDialog(UpdateCheckResult result)
     {
         try
         {
-            Object[] options = {OPEN_DOWNLOAD_PAGE, CLOSE};
-            int choice = JOptionPane.showOptionDialog(null, message, "Update available", JOptionPane.DEFAULT_OPTION,
-                    JOptionPane.INFORMATION_MESSAGE, null, options, options[0]);
-            if (choice == 0)
-            {
-                openInBrowser(downloadUrl);
-            }
+            String downloadUrl = result.downloadUrl();
+            UpdateDialog.show(result.latestVersion().toString(), result.currentVersion().toString(), downloadUrl,
+                    () -> openInBrowser(downloadUrl));
         }
         catch (Exception e)
         {
@@ -84,12 +66,22 @@ public final class UpdateNotifier
 
     static boolean openInBrowser(String url)
     {
+        if (browseWithDesktop(url) || browseWithSystemCommand(url))
+        {
+            return true;
+        }
+        log.info("Could not open a browser, please open {} manually", url);
+        return false;
+    }
+
+    private static boolean browseWithDesktop(String url)
+    {
         try
         {
             Desktop desktop = Desktop.isDesktopSupported() ? Desktop.getDesktop() : null;
             if (desktop == null || !desktop.isSupported(Desktop.Action.BROWSE))
             {
-                log.info("Opening a browser is not supported here, open {} manually", url);
+                log.debug("Opening a browser through java.awt.Desktop is not supported here");
                 return false;
             }
             desktop.browse(URI.create(url));
@@ -97,9 +89,44 @@ public final class UpdateNotifier
         }
         catch (Exception e) // no browser installed, invalid url, headless environment
         {
-            log.info("Could not open {} in a browser ({}) - please open it manually", url, e.toString());
-            log.debug("Opening the download page failed", e);
+            log.debug("Opening {} through java.awt.Desktop failed", url, e);
             return false;
         }
+    }
+
+    /**
+     * java.awt.Desktop cannot browse on many Linux desktops (it needs GNOME libraries), so the URL is handed to the
+     * tool of the operating system that opens it in the default browser.
+     */
+    private static boolean browseWithSystemCommand(String url)
+    {
+        List<String> command = systemBrowseCommand(System.getProperty("os.name", ""), url);
+        try
+        {
+            new ProcessBuilder(command)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            return true;
+        }
+        catch (Exception e) // the tool is not installed
+        {
+            log.debug("Opening {} with {} failed", url, command, e);
+            return false;
+        }
+    }
+
+    static List<String> systemBrowseCommand(String osName, String url)
+    {
+        String os = osName.toLowerCase(Locale.ROOT);
+        if (os.contains("win"))
+        {
+            return List.of("rundll32", "url.dll,FileProtocolHandler", url);
+        }
+        if (os.contains("mac"))
+        {
+            return List.of("open", url);
+        }
+        return List.of("xdg-open", url);
     }
 }

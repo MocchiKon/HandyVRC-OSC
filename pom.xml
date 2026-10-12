@@ -6,7 +6,7 @@
 
     <groupId>org.example</groupId>
     <artifactId>HandyVRC-OSC</artifactId>
-    <version>0.2</version>
+    <version>0.0.1</version>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -15,13 +15,18 @@
         <maven.compiler.release>21</maven.compiler.release>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
+        <!-- Windows runtime shipped next to the .exe by the packageForRelease profile -->
+        <windowsJre.release>jdk-21.0.12.1+1</windowsJre.release>
+        <windowsJre.url>https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_windows_hotspot_21.0.12.1_1.zip</windowsJre.url>
+        <windowsJre.sha256>d35f31e712f0fcf6ac5a093edc90204fbff22f720ba3950bd09d331d5e621636</windowsJre.sha256>
+        <winVersion>${parsedVersion.majorVersion}.${parsedVersion.minorVersion}.${parsedVersion.incrementalVersion}.0</winVersion>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>org.simpleble</groupId>
             <artifactId>simplejavable</artifactId>
-            <version>1.1.0</version>
+            <version>1.2.0</version>
         </dependency>
         <dependency>
             <groupId>com.google.protobuf</groupId>
@@ -149,6 +154,64 @@
                 </executions>
             </plugin>
 
+            <!-- Splits the project version so that the .exe gets the four part version Windows expects -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>parse-version</id>
+                        <goals>
+                            <goal>parse-version</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Wraps the shaded jar into a Windows .exe (target/HandyVRC-OSC.exe) that uses the app icon and starts with the
+                runtime in the jre folder next to it (bundled by the packageForRelease profile). app.ico is rendered from MainWindow.appIcon, so regenerate it
+                when that drawing changes. Runs after the shade plugin because it is declared later and bound to the same phase.
+            -->
+            <plugin>
+                <groupId>com.akathist.maven.plugins.launch4j</groupId>
+                <artifactId>launch4j-maven-plugin</artifactId>
+                <version>2.5.3</version>
+                <executions>
+                    <execution>
+                        <id>windows-exe</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>launch4j</goal>
+                        </goals>
+                        <configuration>
+                            <headerType>gui</headerType>
+                            <jar>${project.build.directory}/${project.build.finalName}.jar</jar>
+                            <outfile>${project.build.directory}/${project.artifactId}.exe</outfile>
+                            <icon>${project.basedir}/src/main/packaging/app.ico</icon>
+                            <dontWrapJar>false</dontWrapJar>
+                            <errTitle>HandyVRC-OSC</errTitle>
+                            <jre>
+                                <path>jre</path>
+                                <requires64Bit>true</requires64Bit>
+                                <minVersion>21</minVersion>
+                            </jre>
+                            <versionInfo>
+                                <fileVersion>${winVersion}</fileVersion>
+                                <txtFileVersion>${project.version}</txtFileVersion>
+                                <fileDescription>HandyVRC-OSC</fileDescription>
+                                <productVersion>${winVersion}</productVersion>
+                                <txtProductVersion>${project.version}</txtProductVersion>
+                                <productName>HandyVRC-OSC</productName>
+                                <internalName>HandyVRC-OSC</internalName>
+                                <originalFilename>${project.artifactId}.exe</originalFilename>
+                            </versionInfo>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- Protobuf code generation -->
             <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
@@ -169,4 +232,85 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Release packaging, run with: mvn package -PpackageForRelease
+            Creates in target/, each with a HandyVRC-OSC folder and the default app.properties inside:
+              HandyVRC-OSC-<version>-windows.zip        HandyVRC-OSC.exe with the bundled Windows JRE
+              HandyVRC-OSC-<version>-all-platforms.zip  HandyVRC-OSC.jar, needs Java 21+ installed
+        -->
+        <profile>
+            <id>packageForRelease</id>
+            <build>
+                <plugins>
+                    <!-- Writes target/release/app.properties from ConfigProperties.defaults() -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>default-app-properties</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>org.example.config.DefaultConfigWriter</mainClass>
+                                    <arguments>
+                                        <argument>${project.build.directory}/release/app.properties</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Downloads the Windows JRE (checksum verified, cached in the local repository) -->
+                    <plugin>
+                        <groupId>com.googlecode.maven-download-plugin</groupId>
+                        <artifactId>download-maven-plugin</artifactId>
+                        <version>1.9.0</version>
+                        <executions>
+                            <execution>
+                                <id>windows-jre</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>wget</goal>
+                                </goals>
+                                <configuration>
+                                    <uri>${windowsJre.url}</uri>
+                                    <sha256>${windowsJre.sha256}</sha256>
+                                    <unpack>true</unpack>
+                                    <outputDirectory>${project.build.directory}/windows-jre</outputDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- Declared after the download so that it runs after it within the package phase -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <version>3.7.1</version>
+                        <executions>
+                            <execution>
+                                <id>release-zips</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <configuration>
+                                    <descriptors>
+                                        <descriptor>src/main/packaging/windows.xml</descriptor>
+                                        <descriptor>src/main/packaging/all-platforms.xml</descriptor>
+                                    </descriptors>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

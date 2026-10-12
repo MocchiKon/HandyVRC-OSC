@@ -52,6 +52,28 @@ class HdspParameterProcessorTest
     }
 
     @Test
+    void reverseMovementSendsPenetrationAsPosition()
+    {
+        var client = new RecordingHandyClient();
+        var processor = new HdspParameterProcessor(client, ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .fullyPenetratedAtValue(50f)
+                .reverseMovement(true)
+                .build());
+        var positions = new ArrayList<Integer>();
+        processor.setValueChangeListener(positions::add);
+
+        processor.actOnValueChange(0.125f); // 12.5% -> 25% penetration -> normalized position 0.25
+        processor.trySendingMessage(0);
+        processor.actOnValueChange(0.5f); // 50% counts as fully penetrated -> top of the stroke
+        processor.trySendingMessage(0);
+
+        assertThat(client.hdspCalls).extracting(HdspCall::xp).containsExactly(0.25f, 1f);
+        assertThat(positions).containsExactly(25, 100);
+    }
+
+    @Test
     void minimalValueChangeIsRespected()
     {
         var processor = new HdspParameterProcessor(ConfigProperties.builder()

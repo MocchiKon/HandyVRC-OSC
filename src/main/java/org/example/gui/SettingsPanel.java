@@ -1,6 +1,7 @@
 package org.example.gui;
 
 import org.example.config.ConfigProperties;
+import org.example.config.InteractWith;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
@@ -34,6 +35,7 @@ public class SettingsPanel extends JPanel
 
     // Basic
     private final SegmentedControl<SpsType> spsType;
+    private final SegmentedControl<InteractWith> interactWith;
     private final SegmentedControl<ParameterProcessorType> algorithm;
     private final ModernCheckBox customAvatarParameter = new ModernCheckBox("Use a custom avatar parameter");
     private final ModernTextField avatarParameter = new ModernTextField("", 20);
@@ -42,6 +44,7 @@ public class SettingsPanel extends JPanel
     private String customAvatarParameterText = "";
     private final ModernSlider strokeRange = new ModernSlider(0, 100, 1, 0, 100, 5);
     private final ModernSlider fullyPenetratedAt = new ModernSlider(10, 100, 1, 85);
+    private final ToggleSwitch reverseMovement = new ToggleSwitch(false);
     private final ToggleSwitch useOscQuery = new ToggleSwitch(true);
     private final ModernTextField listenOnPort = new ModernTextField("", 6);
     private final JLabel listenOnPortHint = new JLabel("Picked automatically while OSCQuery is on");
@@ -91,6 +94,15 @@ public class SettingsPanel extends JPanel
                                 + " device follows how deep a penetrator is inside it; the penetrator length is"
                                 + " detected automatically.")),
                 initialConfig.spsType(), false);
+        interactWith = new SegmentedControl<>(List.of(
+                new SegmentedControl.Option<>(InteractWith.SELF, "Self",
+                        "Only your own body moves the device, for example your penetrator in your own orifice."
+                                + " Handy for trying it out alone."),
+                new SegmentedControl.Option<>(InteractWith.OTHERS, "Others",
+                        "Only other players move the device. Default."),
+                new SegmentedControl.Option<>(InteractWith.BOTH, "Both",
+                        "You and other players move the device.")),
+                initialConfig.interactWith(), false);
         algorithm = new SegmentedControl<>(List.of(
                 new SegmentedControl.Option<>(ParameterProcessorType.HDSP, ParameterProcessorType.HDSP.getLabel(),
                         "Every movement is sent to the device the moment it arrives (1:1). Lowest latency, but"
@@ -133,6 +145,7 @@ public class SettingsPanel extends JPanel
         try
         {
             spsType.setSelected(newConfig.spsType());
+            interactWith.setSelected(newConfig.interactWith());
             algorithm.setSelected(newConfig.processingAlgorithm());
             customAvatarParameter.setSelected(newConfig.customAvatarParameter());
             if (newConfig.customAvatarParameter())
@@ -145,6 +158,7 @@ public class SettingsPanel extends JPanel
                     Math.round(orDefault(newConfig.sliderMax(), 1f) * 100));
             fullyPenetratedAt.setValue(Math.round(orDefault(newConfig.fullyPenetratedAtValue(),
                     ConfigProperties.DEFAULT_FULLY_PENETRATED_AT_VALUE)));
+            reverseMovement.setSelected(newConfig.reverseMovement());
             useOscQuery.setSelected(newConfig.useOscQuery());
             listenOnPort.setText(String.valueOf(newConfig.listenOnPort()));
             listenOnPort.setInvalid(false);
@@ -199,9 +213,11 @@ public class SettingsPanel extends JPanel
 
         boolean custom = customAvatarParameter.isSelected();
         avatarParameter.setEnabled(custom);
+        // A custom parameter decides on its own whose contacts it follows
+        interactWith.setEnabled(!custom);
         if (!custom)
         {
-            String defaultParameter = ConfigProperties.defaultAvatarParameter(config.spsType());
+            String defaultParameter = defaultAvatarParameter();
             if (!avatarParameter.getText().equals(defaultParameter))
             {
                 boolean wasUpdating = updating;
@@ -222,7 +238,11 @@ public class SettingsPanel extends JPanel
     private void installListeners()
     {
         spsType.setSelectionListener(value -> update(b -> b.spsType(value)
-                .avatarParameter(customAvatarParameter.isSelected() ? config.avatarParameter() : ConfigProperties.defaultAvatarParameter(value))));
+                .avatarParameter(customAvatarParameter.isSelected() ? config.avatarParameter()
+                        : ConfigProperties.defaultAvatarParameter(value, config.interactWith()))));
+        interactWith.setSelectionListener(value -> update(b -> b.interactWith(value)
+                .avatarParameter(customAvatarParameter.isSelected() ? config.avatarParameter()
+                        : ConfigProperties.defaultAvatarParameter(config.spsType(), value))));
         algorithm.setSelectionListener(value -> update(b -> b.processingAlgorithm(value)));
 
         customAvatarParameter.addItemListener(e ->
@@ -236,7 +256,7 @@ public class SettingsPanel extends JPanel
                 avatarParameter.setEnabled(true);
                 // Start from the default, which usually only needs a small change (for example the socket name)
                 String text = customAvatarParameterText.isBlank()
-                        ? ConfigProperties.defaultAvatarParameter(config.spsType())
+                        ? defaultAvatarParameter()
                         : customAvatarParameterText;
                 updating = true;
                 avatarParameter.setText(text);
@@ -247,7 +267,7 @@ public class SettingsPanel extends JPanel
             else
             {
                 customAvatarParameterText = avatarParameter.getText().trim();
-                update(b -> b.customAvatarParameter(false).avatarParameter(ConfigProperties.defaultAvatarParameter(config.spsType())));
+                update(b -> b.customAvatarParameter(false).avatarParameter(defaultAvatarParameter()));
             }
         });
         onTextChange(avatarParameter, () ->
@@ -263,6 +283,7 @@ public class SettingsPanel extends JPanel
                 .sliderMin(strokeRange.getLowValue() / 100f)
                 .sliderMax(strokeRange.getHighValue() / 100f)));
         fullyPenetratedAt.addChangeListener(e -> update(b -> b.fullyPenetratedAtValue((float) fullyPenetratedAt.getValue())));
+        reverseMovement.addChangeListener(e -> update(b -> b.reverseMovement(reverseMovement.isSelected())));
         useOscQuery.addChangeListener(e -> update(b -> b.useOscQuery(useOscQuery.isSelected())));
         onTextChange(listenOnPort, () ->
         {
@@ -293,8 +314,13 @@ public class SettingsPanel extends JPanel
     {
         String text = avatarParameter.getText().trim();
         update(b -> text.isEmpty()
-                ? b.customAvatarParameter(false).avatarParameter(ConfigProperties.defaultAvatarParameter(config.spsType()))
+                ? b.customAvatarParameter(false).avatarParameter(defaultAvatarParameter())
                 : b.customAvatarParameter(true).avatarParameter(text));
+    }
+
+    private String defaultAvatarParameter()
+    {
+        return ConfigProperties.defaultAvatarParameter(config.spsType(), config.interactWith());
     }
 
     private JComponent buildBasicPage()
@@ -305,6 +331,9 @@ public class SettingsPanel extends JPanel
         addRow(avatar, controlRow("SPS type",
                 "Which SPS component of your avatar moves the device: your own penetrator, or the orifice someone"
                         + " else penetrates.", spsType));
+        addRow(avatar, controlRow("Interact with",
+                "Whose SPS contacts move the device: only you, only other players, or both. Not used with a custom"
+                        + " avatar parameter.", interactWith));
         avatarParameter.setFont(Theme.font(Font.PLAIN, 12.5f));
         avatarParameterError.setVisible(false);
         var avatarParameterRow = verticalRow();
@@ -320,13 +349,13 @@ public class SettingsPanel extends JPanel
             ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
         }
         applyTooltip(avatarParameterRow, Theme.tooltip(
-                "OSC address of the SPS parameter that drives the device. Unless you check 'Use a custom avatar"
-                        + " parameter', the default for the selected SPS type is used:\n"
+                "OSC address of the SPS parameter that drives the device. It follows 'SPS type' and 'Interact"
+                        + " with', so you only need 'Use a custom avatar parameter' when your avatar uses a different"
+                        + " parameter, for example:\n"
                         + "Penetrator: " + ConfigProperties.DEFAULT_PENETRATOR_PARAMETER + "\n"
                         + "Orifice: " + ConfigProperties.DEFAULT_ORIFICE_PARAMETER + "\n"
-                        + "'*' matches any name. To test it on yourself replace 'Others' with 'Self'. In Orifice mode"
-                        + " the parameter has to end with 'NewRoot', the matching 'NewTip' parameter is found"
-                        + " automatically."));
+                        + "'*' matches any name. In Orifice mode the parameter has to end with 'NewRoot', the matching"
+                        + " 'NewTip' parameter is found automatically."));
         addRow(avatar, avatarParameterRow);
         page.add(avatar);
         page.add(Box.createVerticalStrut(12));
@@ -344,6 +373,10 @@ public class SettingsPanel extends JPanel
                         + " having to go all the way in. With 50% a penetration of 25% already moves the device"
                         + " halfway. 100% turns this off.",
                 fullyPenetratedAt, value -> value + "%"));
+        addRow(movement, toggleRow("Reverse movement", null,
+                "Turns the movement upside down: the device moves up as you go in and down as you pull out,"
+                        + " instead of the other way round. Useful when the device is mounted upside down.",
+                reverseMovement));
         page.add(movement);
         page.add(Box.createVerticalStrut(12));
 
@@ -370,12 +403,14 @@ public class SettingsPanel extends JPanel
         page.add(Box.createVerticalStrut(12));
         page.add(restoreDefaultsButton(defaults -> config.toBuilder()
                 .spsType(defaults.spsType())
+                .interactWith(defaults.interactWith())
                 .processingAlgorithm(defaults.processingAlgorithm())
                 .avatarParameter(defaults.avatarParameter())
                 .customAvatarParameter(false)
                 .sliderMin(defaults.sliderMin())
                 .sliderMax(defaults.sliderMax())
                 .fullyPenetratedAtValue(defaults.fullyPenetratedAtValue())
+                .reverseMovement(defaults.reverseMovement())
                 .useOscQuery(defaults.useOscQuery())
                 .listenOnPort(defaults.listenOnPort())
                 .build()));

@@ -6,8 +6,8 @@ import java.awt.geom.RoundRectangle2D;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Shows the penetration value (the position sent to the device, 100 = top of the stroke, 0 = bottom) as a big
- * number next to a vertical bar that pictures the stroke.
+ * Shows the penetration value (0 = top of the stroke, 100 = bottom) as a big number next to a vertical bar that
+ * pictures the stroke. It is the position sent to the device turned around, as the device counts from the bottom.
  * <p>
  * {@link #setValue} may be called from any thread and as often as values arrive; the gauge repaints at a fixed
  * frame rate and eases the bar towards the newest value, so a burst of values never floods the event queue.
@@ -16,8 +16,9 @@ public class PositionGauge extends JComponent
 {
     private static final int BAR_WIDTH = 46;
 
-    private final AtomicInteger target = new AtomicInteger(100);
-    private float shown = 100;
+    /** Penetration value, 0 = top of the stroke, 100 = bottom. */
+    private final AtomicInteger target = new AtomicInteger(0);
+    private float shown = 0;
     private boolean active;
     /** Detached: shown alone in its own window, as a bar that fills the window with the number below it. */
     private boolean detached;
@@ -28,10 +29,10 @@ public class PositionGauge extends JComponent
         new Timer(16, e -> animate()).start();
     }
 
-    /** @param value position 0-100, may be called from any thread */
-    public void setValue(int value)
+    /** @param position position sent to the device, 0-100 (100 = top), may be called from any thread */
+    public void setValue(int position)
     {
-        target.set(Math.clamp(value, 0, 100));
+        target.set(100 - Math.clamp(position, 0, 100));
     }
 
     /** An inactive gauge (the app is stopped) is drawn dimmed. */
@@ -110,7 +111,7 @@ public class PositionGauge extends JComponent
         g.setFont(Theme.regular(12f));
         g.setColor(Theme.TEXT_MUTED);
         FontMetrics small = g.getFontMetrics();
-        g.drawString("100 = top of the stroke  ·  0 = bottom", textX,
+        g.drawString("0 = top of the stroke  ·  100 = bottom", textX,
                 Math.min(height - small.getDescent() - 2, valueBaseline + small.getHeight() + 6));
         g.dispose();
     }
@@ -135,7 +136,7 @@ public class PositionGauge extends JComponent
         g.drawString(value, (width - metrics.stringWidth(value)) / 2, (int) (barY + barHeight + 14 + numberHeight));
     }
 
-    /** The stroke as a capsule, filled from the bottom up to the current position. */
+    /** The stroke as a capsule, filled from the top down to the current position. */
     private void paintBar(Graphics2D g, float x, float y, float width, float height)
     {
         float arc = Math.min(18, width * 0.4f);
@@ -143,20 +144,20 @@ public class PositionGauge extends JComponent
         g.setColor(Theme.HEADER);
         g.fill(bar);
         float fillHeight = Math.max(0, height * shown / 100f);
+        Shape oldClip = g.getClip();
+        g.clip(bar);
         if (fillHeight > 0)
         {
-            Shape oldClip = g.getClip();
-            g.clip(bar);
-            Color top = active ? Theme.ACCENT_LIGHT : Theme.TEXT_DISABLED;
-            Color bottom = active ? Theme.ACCENT_DARK : Theme.SURFACE_RAISED;
-            g.setPaint(new GradientPaint(0, y + height - fillHeight, top, 0, y + height, bottom));
-            g.fill(new Rectangle.Float(x, y + height - fillHeight, width, fillHeight));
-            // Marker at the current position
-            g.setColor(active ? Theme.TEXT : Theme.TEXT_MUTED);
-            g.fill(new RoundRectangle2D.Float(x + width * 0.18f, y + height - fillHeight - 1.5f + (fillHeight >= height - 2 ? 4 : 0),
-                    width * 0.64f, 3, 3, 3));
-            g.setClip(oldClip);
+            Color top = active ? Theme.ACCENT_DARK : Theme.SURFACE_RAISED;
+            Color bottom = active ? Theme.ACCENT_LIGHT : Theme.TEXT_DISABLED;
+            g.setPaint(new GradientPaint(0, y, top, 0, y + fillHeight, bottom));
+            g.fill(new Rectangle.Float(x, y, width, fillHeight));
         }
+        // Marker at the current position, kept off the rounded ends so that it stays visible at 0 and 100
+        g.setColor(active ? Theme.TEXT : Theme.TEXT_MUTED);
+        float markerY = y + Math.clamp(fillHeight - 1.5f, 4f, Math.max(4f, height - 7f));
+        g.fill(new RoundRectangle2D.Float(x + width * 0.18f, markerY, width * 0.64f, 3, 3, 3));
+        g.setClip(oldClip);
         g.setColor(Theme.BORDER);
         g.draw(new RoundRectangle2D.Float(x + 0.5f, y + 0.5f, width - 1, height - 1, arc, arc));
     }

@@ -43,4 +43,27 @@ class OscAddressPatternTest
         assertThat(new OscAddressPattern("/avatar/parameters/OGB/Pen/*/PenOthers")
                 .matches("/avatar/parameters/OGB/Pen/Big Pen/PenSelf")).isFalse();
     }
+
+    @Test
+    void interactWithBothMatchesSelfAndOthers()
+    {
+        var penetrator = new OscAddressPattern("/avatar/parameters/OGB/Pen/*/{PenSelf,PenOthers}");
+        var orifice = new OscAddressPattern("/avatar/parameters/OGB/Orf/*/{PenSelf,PenOthers}NewRoot");
+
+        assertThat(penetrator.matches("/avatar/parameters/OGB/Pen/Big Pen/PenSelf")).isTrue();
+        assertThat(penetrator.matches("/avatar/parameters/OGB/Pen/Big Pen/PenOthers")).isTrue();
+        assertThat(penetrator.matches("/avatar/parameters/OGB/Pen/Big Pen/FrotOthers")).isFalse();
+        assertThat(orifice.matches("/avatar/parameters/OGB/Orf/1/PenSelfNewRoot")).isTrue();
+        assertThat(orifice.matches("/avatar/parameters/OGB/Orf/1/PenOthersNewRoot")).isTrue();
+        assertThat(orifice.matches("/avatar/parameters/OGB/Orf/1/PenOthersNewTip")).isFalse();
+    }
+
+    @Test
+    void curlyBraceGroupsAreExpandedIntoTheirAlternatives()
+    {
+        assertThat(OscAddressPattern.expandAlternatives("/x/{a,b}/{c,d}e"))
+                .containsExactly("/x/a/ce", "/x/a/de", "/x/b/ce", "/x/b/de");
+        assertThat(OscAddressPattern.expandAlternatives("/x/{a,b")).containsExactly("/x/{a,b");
+        assertThat(OscAddressPattern.expandAlternatives("/x/*/PenOthers")).containsExactly("/x/*/PenOthers");
+    }
 }

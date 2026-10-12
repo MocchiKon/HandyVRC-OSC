@@ -34,6 +34,8 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
      * penetrated. Null when the mapping is disabled.
      */
     private final Float fullyPenetratedAtValue;
+    /** Reverses the movement: fully penetrated is the top of the stroke instead of the bottom. */
+    private final boolean reverseMovement;
     /** Used to auto-detect the penetrator length. Null unless spsType is ORIFICE. */
     protected PenetratorLengthDetector penetratorLengthDetector;
 
@@ -52,6 +54,7 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
         this.minimalValueChange = config.minimalValueChange();
         this.spsType = config.spsType();
         this.fullyPenetratedAtValue = resolveFullyPenetratedAtValue(config);
+        this.reverseMovement = config.reverseMovement();
         // Penetrator length is only needed (and only auto-detected) for orifice
         this.penetratorLengthDetector = spsType == SpsType.ORIFICE ? new PenetratorLengthDetector() : null;
     }
@@ -71,11 +74,15 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     /**
      * @param penetration Penetration amount in the 0-1 range (1 = fully penetrated): the value received for the
      * configured avatar parameter in PENETRATOR mode, or the value calculated from the root proximity in ORIFICE mode.
-     * @return position in the 0-1 range used by the device (1 = fully out/top of the stroke, 0 = fully in/bottom)
+     * @return position in the 0-1 range used by the device (1 = fully out/top of the stroke, 0 = fully in/bottom,
+     * the other way round when 'reverseMovement' is set)
      */
     protected float toDevicePosition(Float penetration)
     {
-        return 1.f - mapToFullyPenetrated(penetration);
+        float mappedPenetration = mapToFullyPenetrated(penetration);
+        // Reversed here, before the processors see the position, so that everything they plan, send and read back
+        // from the device stays in device positions
+        return reverseMovement ? mappedPenetration : 1.f - mappedPenetration;
     }
 
     /**

@@ -16,8 +16,34 @@ class ConfigPropertiesTest
         assertThat(defaults.processingAlgorithm()).isEqualTo(ParameterProcessorType.HDSP_SMOOTHED);
         assertThat(defaults.fullyPenetratedAtValue()).isEqualTo(85f);
         assertThat(defaults.customAvatarParameter()).isFalse();
-        assertThat(defaults.avatarParameter()).isEqualTo(ConfigProperties.defaultAvatarParameter(defaults.spsType()));
+        assertThat(defaults.avatarParameter()).isEqualTo(ConfigProperties.defaultAvatarParameter(defaults.spsType(), defaults.interactWith()));
         assertThat(defaults.validate()).isNull();
+    }
+
+    @Test
+    void defaultAvatarParameterFollowsInteractWith()
+    {
+        assertThat(ConfigProperties.defaultAvatarParameter(SpsType.PENETRATOR, InteractWith.OTHERS))
+                .isEqualTo(ConfigProperties.DEFAULT_PENETRATOR_PARAMETER);
+        assertThat(ConfigProperties.defaultAvatarParameter(SpsType.ORIFICE, InteractWith.OTHERS))
+                .isEqualTo(ConfigProperties.DEFAULT_ORIFICE_PARAMETER);
+        assertThat(ConfigProperties.defaultAvatarParameter(SpsType.PENETRATOR, InteractWith.SELF))
+                .isEqualTo("/avatar/parameters/OGB/Pen/*/PenSelf");
+        assertThat(ConfigProperties.defaultAvatarParameter(SpsType.ORIFICE, InteractWith.SELF))
+                .isEqualTo("/avatar/parameters/OGB/Orf/*/PenSelfNewRoot");
+        assertThat(ConfigProperties.defaultAvatarParameter(SpsType.PENETRATOR, InteractWith.BOTH))
+                .isEqualTo("/avatar/parameters/OGB/Pen/*/{PenSelf,PenOthers}");
+    }
+
+    @Test
+    void orificeParameterForBothHasAMatchingTipParameter()
+    {
+        String root = ConfigProperties.defaultAvatarParameter(SpsType.ORIFICE, InteractWith.BOTH);
+
+        assertThat(root).isEqualTo("/avatar/parameters/OGB/Orf/*/{PenSelf,PenOthers}NewRoot");
+        assertThat(ConfigProperties.penetratorTipParameter(SpsType.ORIFICE, root))
+                .isEqualTo("/avatar/parameters/OGB/Orf/*/{PenSelf,PenOthers}NewTip");
+        assertThat(ConfigProperties.validateAvatarParameter(SpsType.ORIFICE, root)).isNull();
     }
 
     @Test

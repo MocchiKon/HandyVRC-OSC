@@ -7,16 +7,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class UpdateNotifierTest
 {
     @Test
-    void messageShowsBothVersionsTheDownloadPageAndHowToTurnTheCheckOff()
+    void urlIsOpenedWithTheBrowserToolOfTheOperatingSystem()
     {
-        var result = UpdateCheckResult.updateAvailable(version("0.2"), version("0.3"),
-                "https://example.test/releases/0.3");
+        String url = "https://example.test/releases/0.3";
 
-        assertThat(UpdateNotifier.notificationMessage(result))
-                .contains("0.3")
-                .contains("0.2")
-                .contains("https://example.test/releases/0.3")
-                .contains("Check for updates");
+        assertThat(UpdateNotifier.systemBrowseCommand("Linux", url)).containsExactly("xdg-open", url);
+        assertThat(UpdateNotifier.systemBrowseCommand("Mac OS X", url)).containsExactly("open", url);
+        assertThat(UpdateNotifier.systemBrowseCommand("Windows 11", url))
+                .containsExactly("rundll32", "url.dll,FileProtocolHandler", url);
     }
 
     @Test

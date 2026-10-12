@@ -75,12 +75,13 @@ public class ConfigLoader
         ConfigProperties defaults = ConfigProperties.defaults();
 
         SpsType spsType = getEnum(properties, "spsType", SpsType.class, defaults.spsType());
+        InteractWith interactWith = getEnum(properties, "interactWith", InteractWith.class, defaults.interactWith());
         ParameterProcessorType processingAlgorithm = getProperty(properties, "processingAlgorithm")
                 .map(value -> parseProcessingAlgorithm(value, defaults.processingAlgorithm()))
                 .orElse(defaults.processingAlgorithm());
 
         Optional<String> customAvatarParameter = getProperty(properties, "avatarParameter");
-        String avatarParameter = customAvatarParameter.orElseGet(() -> ConfigProperties.defaultAvatarParameter(spsType));
+        String avatarParameter = customAvatarParameter.orElseGet(() -> ConfigProperties.defaultAvatarParameter(spsType, interactWith));
 
         Float sliderMin = getFloat(properties, "sliderMin", defaults.sliderMin(), 0f, 1f);
         Float sliderMax = getFloat(properties, "sliderMax", defaults.sliderMax(), 0f, 1f);
@@ -93,12 +94,14 @@ public class ConfigLoader
 
         return ConfigProperties.builder()
                 .spsType(spsType)
+                .interactWith(interactWith)
                 .processingAlgorithm(processingAlgorithm)
                 .avatarParameter(avatarParameter)
                 .customAvatarParameter(customAvatarParameter.isPresent())
                 .sliderMin(sliderMin)
                 .sliderMax(sliderMax)
                 .fullyPenetratedAtValue(getFloat(properties, "fullyPenetratedAtValue", defaults.fullyPenetratedAtValue(), 1f, 100f))
+                .reverseMovement(getBoolean(properties, "reverseMovement", defaults.reverseMovement()))
                 .listenOnPort(getInt(properties, "listenOnPort", defaults.listenOnPort(), 1, 65535))
                 .useOscQuery(getBoolean(properties, "useOscQuery", defaults.useOscQuery()))
                 .sendMessageEveryMs(getInt(properties, "sendMessageEveryMs", defaults.sendMessageEveryMs(), 0, 10_000))
@@ -171,16 +174,20 @@ public class ConfigLoader
         section(out, "Basic");
         entry(out, "spsType", config.spsType(),
                 "PENETRATOR or ORIFICE: which SPS component of your avatar moves the device.");
+        entry(out, "interactWith", config.interactWith(),
+                "SELF, OTHERS or BOTH: whose SPS contacts move the device (you, other players, or both).");
         entry(out, "processingAlgorithm", config.processingAlgorithm(),
                 "HDSP_SMOOTHED (shown as 'Smoothed', default) or HDSP (shown as 'Direct').");
         entry(out, "avatarParameter", config.customAvatarParameter() ? config.avatarParameter() : "",
-                "Custom avatar parameter. Blank uses the default for the spsType:",
+                "Custom avatar parameter. Blank uses the default for spsType and interactWith, for example:",
                 "PENETRATOR - " + ConfigProperties.DEFAULT_PENETRATOR_PARAMETER,
                 "ORIFICE    - " + ConfigProperties.DEFAULT_ORIFICE_PARAMETER + " (has to end with 'NewRoot')");
         entry(out, "sliderMin", config.sliderMin(), "Bottom of the stroke the device uses (0.0 - 1.0).");
         entry(out, "sliderMax", config.sliderMax(), "Top of the stroke the device uses (0.0 - 1.0).");
         entry(out, "fullyPenetratedAtValue", config.fullyPenetratedAtValue(),
                 "Penetration (in %) that counts as fully penetrated, so that the full stroke is used.");
+        entry(out, "reverseMovement", config.reverseMovement(),
+                "Reverses the slider movement: fully penetrated moves the device to the top instead of the bottom.");
         entry(out, "listenOnPort", config.listenOnPort(),
                 "OSC port. Only used when useOscQuery=false or when OSCQuery could not be started.");
         entry(out, "useOscQuery", config.useOscQuery(),

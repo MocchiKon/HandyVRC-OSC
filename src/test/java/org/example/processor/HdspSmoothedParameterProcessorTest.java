@@ -59,6 +59,21 @@ class HdspSmoothedParameterProcessorTest
     }
 
     @Test
+    void reverseMovementMovesTheSliderUpWhenPenetrating()
+    {
+        var config = ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .reverseMovement(true)
+                .build();
+        var harness = new Harness(config);
+
+        harness.feed(0.75f); // Received penetration 25%, which is 25% from the bottom of the stroke when reversed
+
+        assertThat(harness.processor.sliderPositionForTest(harness.virtualTimeMs())).isCloseTo(0.25, within(0.001));
+    }
+
+    @Test
     void sliderFollowsTheInputThroughAStroke()
     {
         var harness = new Harness();

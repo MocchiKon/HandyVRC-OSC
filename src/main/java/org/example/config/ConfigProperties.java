@@ -14,14 +14,18 @@ import org.example.processor.SpsType;
 public record ConfigProperties(
         // Basic
         SpsType spsType,
+        // Whose contacts move the device, selects the default avatar parameter
+        InteractWith interactWith,
         ParameterProcessorType processingAlgorithm,
-        // Effective avatar parameter: the custom one, or the default for the spsType when not customized
+        // Effective avatar parameter: the custom one, or the default for spsType and interactWith when not customized
         String avatarParameter,
-        // True when the user entered the avatar parameter instead of using the default for the spsType
+        // True when the user entered the avatar parameter instead of using the default for spsType and interactWith
         boolean customAvatarParameter,
         Float sliderMin,
         Float sliderMax,
         Float fullyPenetratedAtValue,
+        // Reverses the slider movement: fully penetrated is the top of the stroke instead of the bottom
+        boolean reverseMovement,
         int listenOnPort,
         boolean useOscQuery,
 
@@ -60,12 +64,14 @@ public record ConfigProperties(
     {
         return ConfigProperties.builder()
                 .spsType(SpsType.PENETRATOR)
+                .interactWith(InteractWith.OTHERS)
                 .processingAlgorithm(ParameterProcessorType.HDSP_SMOOTHED)
-                .avatarParameter(defaultAvatarParameter(SpsType.PENETRATOR))
+                .avatarParameter(defaultAvatarParameter(SpsType.PENETRATOR, InteractWith.OTHERS))
                 .customAvatarParameter(false)
                 .sliderMin(0f)
                 .sliderMax(1f)
                 .fullyPenetratedAtValue(DEFAULT_FULLY_PENETRATED_AT_VALUE)
+                .reverseMovement(false)
                 .listenOnPort(DEFAULT_LISTEN_ON_PORT)
                 .useOscQuery(true)
                 .sendMessageEveryMs(0)
@@ -83,9 +89,16 @@ public record ConfigProperties(
                 .build();
     }
 
-    public static String defaultAvatarParameter(SpsType spsType)
+    /**
+     * @return the parameter used unless a custom one is set, for example '/avatar/parameters/OGB/Pen/*&#47;PenSelf'
+     * (PENETRATOR, SELF) or '/avatar/parameters/OGB/Orf/*&#47;{PenSelf,PenOthers}NewRoot' (ORIFICE, BOTH)
+     */
+    public static String defaultAvatarParameter(SpsType spsType, InteractWith interactWith)
     {
-        return spsType == SpsType.ORIFICE ? DEFAULT_ORIFICE_PARAMETER : DEFAULT_PENETRATOR_PARAMETER;
+        InteractWith who = interactWith == null ? InteractWith.OTHERS : interactWith;
+        return spsType == SpsType.ORIFICE
+                ? "/avatar/parameters/OGB/Orf/*/" + who.parameterName() + NEW_ROOT_SUFFIX
+                : "/avatar/parameters/OGB/Pen/*/" + who.parameterName();
     }
 
     /**

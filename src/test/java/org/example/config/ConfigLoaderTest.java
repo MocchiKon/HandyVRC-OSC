@@ -81,6 +81,36 @@ class ConfigLoaderTest
     }
 
     @Test
+    void interactWithSelectsTheDefaultAvatarParameter() throws IOException
+    {
+        var self = loadConfig("""
+                spsType=ORIFICE
+                interactWith=SELF
+                """);
+        var olderFile = loadConfig("""
+                spsType=PENETRATOR
+                """);
+
+        assertThat(self.interactWith()).isEqualTo(InteractWith.SELF);
+        assertThat(self.avatarParameter()).isEqualTo("/avatar/parameters/OGB/Orf/*/PenSelfNewRoot");
+        assertThat(self.penetratorTipParameter()).isEqualTo("/avatar/parameters/OGB/Orf/*/PenSelfNewTip");
+        // A file written before interactWith existed keeps following other players
+        assertThat(olderFile.interactWith()).isEqualTo(InteractWith.OTHERS);
+    }
+
+    @Test
+    void customAvatarParameterIsKeptWhateverInteractWithSays() throws IOException
+    {
+        var config = loadConfig("""
+                interactWith=SELF
+                avatarParameter=/avatar/parameters/My/Custom
+                """);
+
+        assertThat(config.customAvatarParameter()).isTrue();
+        assertThat(config.avatarParameter()).isEqualTo("/avatar/parameters/My/Custom");
+    }
+
+    @Test
     void smoothedIsTheDefaultAlgorithm() throws IOException
     {
         var config = loadConfig("""
@@ -195,6 +225,14 @@ class ConfigLoaderTest
     }
 
     @Test
+    void reverseMovementIsOffByDefault() throws IOException
+    {
+        assertThat(loadConfig("spsType=PENETRATOR").reverseMovement()).isFalse();
+        assertThat(loadConfig("reverseMovement=maybe").reverseMovement()).isFalse();
+        assertThat(loadConfig("reverseMovement=true").reverseMovement()).isTrue();
+    }
+
+    @Test
     void fullyPenetratedAtValueDefaultsTo85Percent() throws IOException
     {
         assertThat(loadConfig("spsType=PENETRATOR").fullyPenetratedAtValue()).isEqualTo(85f);
@@ -245,12 +283,14 @@ class ConfigLoaderTest
     {
         var config = ConfigProperties.defaults().toBuilder()
                 .spsType(SpsType.ORIFICE)
+                .interactWith(InteractWith.BOTH)
                 .processingAlgorithm(ParameterProcessorType.HDSP)
                 .avatarParameter("/avatar/parameters/OGB/Orf/My Socket/PenSelfNewRoot")
                 .customAvatarParameter(true)
                 .sliderMin(0.1f)
                 .sliderMax(0.95f)
                 .fullyPenetratedAtValue(70f)
+                .reverseMovement(true)
                 .listenOnPort(9123)
                 .useOscQuery(false)
                 .sendMessageEveryMs(40)
