@@ -299,13 +299,34 @@ public class HandyClientBle extends HandyClient
             {
                 var state = resp.getResponseSliderStrokeGet();
                 log.info("SliderGet Response {}", state);
-                return Optional.of(new SliderSettingsResult(String.valueOf(state.getMin()), String.valueOf(state.getMax())));
+                return Optional.of(new SliderSettingsResult(String.valueOf(state.getMin()), String.valueOf(state.getMax()),
+                        state.getMinAbsolute(), state.getMaxAbsolute()));
             }
             return Optional.empty();
         }
         catch (Exception e)
         {
             throw new RuntimeException("BLE SliderGet failed", e);
+        }
+    }
+
+    @Override
+    public Optional<SliderState> getSliderState()
+    {
+        try
+        {
+            HandyRpc.Response resp = rpc.sendRequest(HandyRpc.Request.newBuilder()
+                    .setRequestSliderStateGet(Messages.RequestSliderStateGet.getDefaultInstance()));
+            if (resp.hasResponseSliderStateGet())
+            {
+                var state = resp.getResponseSliderStateGet();
+                return Optional.of(new SliderState(state.getPosition(), state.getPositionAbsolute(), state.getSpeedAbsolute()));
+            }
+            return Optional.empty();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException("BLE SliderStateGet failed", e);
         }
     }
 

@@ -2,10 +2,7 @@ package org.example.handy.common;
 
 import handy.model.DeviceModeValue;
 import lombok.extern.slf4j.Slf4j;
-import org.example.handy.common.dto.HandyHspAddResponse;
-import org.example.handy.common.dto.HandySetupResponse;
-import org.example.handy.common.dto.HspAddRequest;
-import org.example.handy.common.dto.SliderSettingsResult;
+import org.example.handy.common.dto.*;
 
 import java.util.Arrays;
 import java.util.Optional;
@@ -42,6 +39,15 @@ public abstract class HandyClient implements AutoCloseable
     public HandyBaseResponseWithError hdspXpt(float xp, int t, boolean stopOnTarget)
     {
         throw new UnsupportedOperationException("HDSP is only supported over a Bluetooth (BLE) connection");
+    }
+
+    /**
+     * Reads the position and speed the slider has right now. Only the direct Bluetooth connection can read it; the
+     * default implementation reports nothing.
+     */
+    public Optional<SliderState> getSliderState()
+    {
+        return Optional.empty();
     }
 
     /**

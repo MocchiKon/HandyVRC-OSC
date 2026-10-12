@@ -107,6 +107,9 @@ public class ConfigLoader
                 .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_DIVERGENCE_THRESHOLD_PERCENT);
         Integer hdspSpeedMeasureWindowMs = getProperty(properties, "hdspSpeedMeasureWindowMs")
                 .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_MEASURE_WINDOW_MS);
+        Integer hdspMinSliderSpeed = getProperty(properties, "hdspMinSliderSpeed")
+                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_MIN_SLIDER_SPEED_MM_PER_SECOND);
+        boolean hdspLogDevicePosition = Boolean.parseBoolean(getPropertyOrDefault(properties, "hdspLogDevicePosition", "false"));
         boolean useOscQuery = Boolean.parseBoolean(getPropertyOrDefault(properties, "useOscQuery", "true"));
 
         boolean isApiMode = connectionMode == ConnectionMode.API;
@@ -141,6 +144,8 @@ public class ConfigLoader
                 .hdspSpeedStopThresholdPercent(hdspSpeedStopThresholdPercent)
                 .hdspDivergenceThresholdPercent(hdspDivergenceThresholdPercent)
                 .hdspSpeedMeasureWindowMs(hdspSpeedMeasureWindowMs)
+                .hdspMinSliderSpeed(hdspMinSliderSpeed)
+                .hdspLogDevicePosition(hdspLogDevicePosition)
                 .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
                 .useOscQuery(useOscQuery)
                 .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)

@@ -96,8 +96,13 @@ public class HandyBleAdapter implements RpcTransport
                 .anyMatch(s -> s.uuid().equals(SERVICE_UUID));
     }
 
+    /**
+     * Writes a message to the device. Synchronized because more than one thread can send (the movement commands
+     * and, for diagnostics, the device position requests), and the BLE library does not promise that concurrent
+     * writes to one peripheral are safe.
+     */
     @Override
-    public void write(byte[] payload)
+    public synchronized void write(byte[] payload)
     {
         if (!isConnected())
         {

@@ -22,6 +22,8 @@ public record ConfigProperties(
         Integer hdspSpeedStopThresholdPercent,
         Integer hdspDivergenceThresholdPercent,
         Integer hdspSpeedMeasureWindowMs,
+        Integer hdspMinSliderSpeed,
+        boolean hdspLogDevicePosition,
         int handyApiVersion,
         int listenOnPort,
         boolean useOscQuery,
@@ -59,6 +61,8 @@ public record ConfigProperties(
                 ", hdspSpeedStopThresholdPercent=" + hdspSpeedStopThresholdPercent +
                 ", hdspDivergenceThresholdPercent=" + hdspDivergenceThresholdPercent +
                 ", hdspSpeedMeasureWindowMs=" + hdspSpeedMeasureWindowMs +
+                ", hdspMinSliderSpeed=" + hdspMinSliderSpeed +
+                ", hdspLogDevicePosition=" + hdspLogDevicePosition +
                 ", handyApiVersion=" + handyApiVersion +
                 ", listenOnPort=" + listenOnPort +
                 ", useOscQuery=" + useOscQuery +

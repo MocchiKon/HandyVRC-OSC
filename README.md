@@ -31,7 +31,27 @@ Then run the app by double-clicking "start.bat" file. GUI only displays current 
   * The slider is never told to move further than you actually moved, so it cannot overshoot the next point and
     bounce back when you slow down or reverse direction.
   * When you stop moving, the slider is stopped at the position you stopped at instead of finishing the move it
-    was on, and it continues from there when you move again.
+    was on, and it continues from there when you move again. A slider that got slightly past your position is
+    stopped where it is rather than being sent back.
+  * A change of direction only counts once you moved back by at least 2% of the stroke, so the jitter of a slow
+    movement cannot make the slider reverse.
+  * A sudden stop of a fast movement is noticed from the next value (or when the next value is overdue). The slider
+    can end up a little past you (about one frame of movement plus the Bluetooth delay); it is stopped there instead
+    of being sent back, so there is no bounce.
+  * VRChat only sends a value once it changed, so a slow movement arrives as a few values per second. The speed is
+    measured over at least a few values, and only a gap that is clearly longer than the recent ones counts as a
+    stop. Slow movements (below 25%/s) are measured over the last 500ms instead of `hdspSpeedMeasureWindowMs`, which
+    keeps the jitter of a tracked hand from stopping and restarting the slider, and after a stop the slider only
+    follows again once you moved 2% away from where you stopped.
+  * A Handy does not move slower than about 30 mm/s, whatever it is told (`hdspMinSliderSpeed`, default 30). A
+    movement slower than that is followed in steps: the slider waits until you are a little ahead and then moves to
+    you at its minimum speed, stopping there, so it never runs ahead of you and never has to be pulled back.
+  * A stop is sent as soon as it is noticed (it does not wait for `sendMessageEveryMs`, which only spaces out the
+    speed corrections). At startup the slider position is read from the device, and a slider that is far from you
+    (further than `hdspDivergenceThresholdPercent`) is brought to you at a moderate speed.
+  * `hdspLogDevicePosition=true` logs the position the device reports next to the position the app believes the
+    slider is at, which shows whether the device moves the way it is told to, and every received value is logged at
+    TRACE level, so that a session can be replayed from its log.
   * Movements slower than 4%/s are treated as a stop. `hdspSpeedMeasureWindowMs` sets how quickly a speed change
     is followed. With `logLevel=DEBUG` the measured input rate and every command (with the speed it was planned
     with) are logged, which is what the thresholds can be tuned with.
