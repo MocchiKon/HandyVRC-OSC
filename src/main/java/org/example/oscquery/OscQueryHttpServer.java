@@ -123,9 +123,10 @@ public class OscQueryHttpServer implements Closeable
     }
 
     /**
-     * The OSC address tree VRChat reads to decide what to send. Only {@code /avatar} is needed: VRChat then sends
-     * {@code /avatar/change} and all {@code /avatar/parameters/*} messages, and the concrete parameters are
-     * configured in app.properties rather than here.
+     * The OSC address tree VRChat reads to decide what to send. {@code /avatar} is the path VRChat sends avatar
+     * data to, and {@code /avatar/change} is registered as well because a tree that only contains containers is not
+     * enough for VRChat to start sending - every OSC receiver that is known to work (VRCFaceTracking, OscGoesBrrr,
+     * VRCOSC) lists that endpoint too. The concrete parameters are configured in app.properties rather than here.
      */
     private static byte[] buildRootTree()
     {
@@ -135,6 +136,10 @@ public class OscQueryHttpServer implements Closeable
         ObjectNode avatar = root.putObject("CONTENTS").putObject("avatar");
         avatar.put("FULL_PATH", "/avatar");
         avatar.put("ACCESS", 0);
+        ObjectNode change = avatar.putObject("CONTENTS").putObject("change");
+        change.put("FULL_PATH", "/avatar/change");
+        change.put("ACCESS", 2); // VRChat only writes to it
+        change.put("TYPE", "s");
         return toJson(root);
     }
 

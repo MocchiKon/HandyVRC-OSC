@@ -48,6 +48,17 @@ class OscQueryHttpServerTest
     }
 
     @Test
+    void registersAvatarChangeSoThatVrchatStartsSending() throws Exception
+    {
+        JsonNode tree = OBJECT_MAPPER.readTree(get("http://127.0.0.1:" + server.getPort() + "/"));
+
+        JsonNode change = tree.path("CONTENTS").path("avatar").path("CONTENTS").path("change");
+        assertThat(change.path("FULL_PATH").asText()).isEqualTo("/avatar/change");
+        assertThat(change.path("TYPE").asText()).isEqualTo("s");
+        assertThat(change.path("ACCESS").asInt()).isEqualTo(2); // VRChat writes to it, it has no value to read
+    }
+
+    @Test
     void servesHostInfoWithTheOscPort() throws Exception
     {
         JsonNode hostInfo = OBJECT_MAPPER.readTree(get("http://127.0.0.1:" + server.getPort() + "/?HOST_INFO"));

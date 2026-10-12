@@ -23,15 +23,17 @@ import java.util.function.Consumer;
  * This is what makes a port collision impossible: VRChat is told where to send messages instead of having to use
  * the fixed port 9001, so another application listening on that port does not matter anymore.
  * <p>
- * Both the OSCQuery HTTP server and the OSC listener use the same port number (TCP and UDP respectively), because
- * VRChat may take the OSC destination port either from HOST_INFO or from the advertised OSC service.
+ * Two mDNS libraries are involved, for a reason: the advertisement has to use the record layout VRChat understands
+ * and is therefore sent by {@link MdnsAdvertisement}, while the discovery of other services (used to read and
+ * validate the avatar parameters of VRChat) is done by JmDNS, which handles the caching and the address resolution
+ * of the services it finds. See {@link MdnsMessage} for what VRChat expects from the advertisement.
  */
 @Slf4j
 public class OscQueryService implements Closeable
 {
     public static final String SERVICE_NAME = "HandyVRC-OSC";
-    public static final String OSC_QUERY_SERVICE_TYPE = "_oscjson._tcp.local.";
-    public static final String OSC_SERVICE_TYPE = "_osc._udp.local.";
+    public static final String OSC_QUERY_SERVICE_TYPE = MdnsMessage.OSC_QUERY_SERVICE_TYPE;
+    public static final String OSC_SERVICE_TYPE = MdnsMessage.OSC_SERVICE_TYPE;
 
     /** How long mDNS resolution of a discovered service may take. */
     private static final long RESOLVE_TIMEOUT_MS = 2000;
@@ -41,16 +43,19 @@ public class OscQueryService implements Closeable
 
     private final JmDNS jmDns;
     private final OscQueryHttpServer httpServer;
+    private final MdnsAdvertisement advertisement;
     private final String ourServiceName;
 
     private final List<Consumer<OscQueryServiceProfile>> discoveryListeners = new CopyOnWriteArrayList<>();
     private final Map<String, OscQueryServiceProfile> discoveredServices = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
-    private OscQueryService(JmDNS jmDns, OscQueryHttpServer httpServer, String ourServiceName)
+    private OscQueryService(JmDNS jmDns, OscQueryHttpServer httpServer, MdnsAdvertisement advertisement,
+                            String ourServiceName)
     {
         this.jmDns = jmDns;
         this.httpServer = httpServer;
+        this.advertisement = advertisement;
         this.ourServiceName = ourServiceName;
     }
 
@@ -63,20 +68,17 @@ public class OscQueryService implements Closeable
     public static OscQueryService start(int port) throws IOException
     {
         InetAddress localAddress = findLocalAddress();
-        JmDNS jmDns = createJmDns(localAddress);
         OscQueryHttpServer httpServer = null;
+        MdnsAdvertisement advertisement = null;
+        JmDNS jmDns = null;
         try
         {
             // The HTTP server has to answer before the service is announced, VRChat queries it right away
             httpServer = new OscQueryHttpServer(port, localAddress.getHostAddress(), port);
-            ServiceInfo oscQueryInfo = ServiceInfo.create(OSC_QUERY_SERVICE_TYPE, SERVICE_NAME, httpServer.getPort(),
-                    0, 0, Map.of("txtvers", "1"));
-            ServiceInfo oscInfo = ServiceInfo.create(OSC_SERVICE_TYPE, SERVICE_NAME, port,
-                    0, 0, Map.of("txtvers", "1"));
-            jmDns.registerService(oscQueryInfo);
-            jmDns.registerService(oscInfo);
+            advertisement = MdnsAdvertisement.start(SERVICE_NAME, localAddress, httpServer.getPort(), port);
+            jmDns = startDiscoveryClient(localAddress);
 
-            var service = new OscQueryService(jmDns, httpServer, oscQueryInfo.getName());
+            var service = new OscQueryService(jmDns, httpServer, advertisement, SERVICE_NAME);
             service.startDiscovery();
             Runtime.getRuntime().addShutdownHook(new Thread(service::close, "OSCQuery-Shutdown"));
             log.info("OSCQuery: announced '{}' on {} - VRChat can send OSC messages to UDP port {} (OSCQuery HTTP"
@@ -86,19 +88,31 @@ public class OscQueryService implements Closeable
         }
         catch (IOException | RuntimeException e)
         {
+            closeQuietly(advertisement);
+            closeQuietly(jmDns);
             if (httpServer != null)
             {
                 httpServer.close();
             }
-            try
-            {
-                jmDns.close();
-            }
-            catch (IOException closeError)
-            {
-                log.debug("Could not close mDNS after a failed start: {}", closeError.getMessage());
-            }
             throw e;
+        }
+    }
+
+    /**
+     * @return the mDNS client that looks for VRChat's own OSCQuery service, or null when it cannot be started
+     */
+    private static JmDNS startDiscoveryClient(InetAddress address)
+    {
+        try
+        {
+            return createJmDns(address);
+        }
+        catch (IOException e)
+        {
+            // The app receives the avatar parameters without it as well, only their validation is skipped then
+            log.warn("Could not start the mDNS client that looks for VRChat's OSCQuery service ({}). The avatar"
+                    + " parameters are still received.", e.getMessage());
+            return null;
         }
     }
 
@@ -126,27 +140,19 @@ public class OscQueryService implements Closeable
             return;
         }
         closed = true;
-        try
-        {
-            jmDns.unregisterAllServices(); // Says goodbye to the network instead of leaving a stale service behind
-        }
-        catch (Exception e)
-        {
-            log.debug("Could not unregister OSCQuery services: {}", e.getMessage());
-        }
-        try
-        {
-            jmDns.close();
-        }
-        catch (IOException e)
-        {
-            log.debug("Could not close mDNS: {}", e.getMessage());
-        }
+        // Says goodbye to the network instead of leaving a stale service behind, then stops the announcements
+        advertisement.close();
+        // JmDNS is only used to find other services, this app is advertised by MdnsAdvertisement
+        closeQuietly(jmDns);
         httpServer.close();
     }
 
     private void startDiscovery()
     {
+        if (jmDns == null)
+        {
+            return; // No mDNS client, so no other service can be found (and the advertisement does not need one)
+        }
         jmDns.addServiceListener(OSC_QUERY_SERVICE_TYPE, new ServiceListener()
         {
             @Override
@@ -314,6 +320,22 @@ public class OscQueryService implements Closeable
         catch (UnknownHostException e)
         {
             throw new IllegalStateException("127.0.0.1 does not resolve", e);
+        }
+    }
+
+    private static void closeQuietly(Closeable closeable)
+    {
+        if (closeable == null)
+        {
+            return;
+        }
+        try
+        {
+            closeable.close();
+        }
+        catch (IOException e)
+        {
+            log.debug("Could not close after a failed start: {}", e.getMessage());
         }
     }
 }

@@ -50,10 +50,10 @@ but they are **not tested**.
 
 ## Something doesn't work?
 
-* **The number doesn't move:** make sure OSC is enabled in VRChat. If it's the first time you use this version,
-  restart VRChat once.
-* **Still nothing:** open the **Logs** tab and look for what went wrong, or turn off **Use OSCQuery** on the
-  Advanced tab.
+* **The number doesn't move:** make sure OSC is enabled in VRChat. VRChat shows a short notification when it starts
+  sending data to this app (it names **HandyVRC-OSC**); if that notification never shows up, turn off **Use
+  OSCQuery** on the Advanced tab, then VRChat sends to the fixed port 9001 instead.
+* **Still nothing:** open the **Logs** tab and look for what went wrong.
 * **The Handy doesn't connect:** check that Bluetooth is on and the Handy is on Firmware 4.
 * **Intiface doesn't connect:** check that the Intiface Central server is running, that it shows your device, and
   that the **Intiface address** matches the one in Intiface Central.
