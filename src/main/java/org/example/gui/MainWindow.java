@@ -1,5 +1,6 @@
 package org.example.gui;
 
+import ch.qos.logback.classic.Level;
 import lombok.extern.slf4j.Slf4j;
 import org.example.AppController;
 import org.example.config.ConfigLoader;
@@ -36,6 +37,18 @@ public class MainWindow
             Theme.bold(12f), Theme.ACCENT_LIGHT);
     private final ModernButton startStopButton = new ModernButton("Start", ModernButton.Style.PRIMARY);
     private final ModernButton applyButton = new ModernButton("Apply changes", ModernButton.Style.PRIMARY);
+    private final ModernButton testModeButton = new ModernButton("Test mode", ModernButton.Style.SECONDARY);
+    private final IconButton detachButton = new IconButton(IconButton.Glyph.DETACH,
+            "Shows the penetration value in its own small window, for example to keep it next to VRChat.");
+    private final IconButton attachButton = new IconButton(IconButton.Glyph.ATTACH,
+            "Puts the penetration value back into this window.");
+    private final CardLayout gaugeSlots = new CardLayout();
+    private final JPanel gaugeSlot = new JPanel(gaugeSlots);
+    private final JPanel attachedGaugeHolder = new JPanel(new BorderLayout());
+    /** The window the penetration value is shown in while it is detached, null while it is attached. */
+    private JFrame gaugeWindow;
+    private Rectangle gaugeWindowBounds;
+    private TestModeWindow testWindow;
     private final JLabel footer = new JLabel();
     private final SettingsPanel settings;
     private final Timer saveTimer;
@@ -78,8 +91,8 @@ public class MainWindow
 
         frame.setContentPane(buildContent());
         Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
-        frame.setSize(Math.min(640, screen.width), Math.min(1000, screen.height - 20));
-        frame.setMinimumSize(new Dimension(520, 600));
+        frame.setSize(Math.min(700, screen.width), Math.min(1060, screen.height - 20));
+        frame.setMinimumSize(new Dimension(560, 620));
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
         startStopButton.requestFocusInWindow();
@@ -137,7 +150,6 @@ public class MainWindow
         var pillHolder = new JPanel(new GridBagLayout());
         pillHolder.setOpaque(false);
         pillHolder.add(statusPill);
-        statusPill.setToolTipText(Theme.tooltip("Whether the app is connected to your Handy and moving it."));
         header.add(pillHolder, BorderLayout.EAST);
         return header;
     }
@@ -147,16 +159,36 @@ public class MainWindow
         var hero = new RoundedPanel(new GridBagLayout(), Theme.SURFACE, Theme.RADIUS * 2);
         hero.setBorderColor(Theme.withAlpha(Theme.BORDER, 150));
         hero.setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
-        gauge.setToolTipText(Theme.tooltip("Current penetration value collected via OSC and sent to the device"
-                + " (100 = top of the stroke, 0 = bottom)."));
+
+        // The gauge, or a note while it is shown in its own window
+        attachedGaugeHolder.setOpaque(false);
+        attachedGaugeHolder.add(gauge, BorderLayout.CENTER);
+        var detachedNote = new JLabel("The penetration value is shown in its own window.");
+        detachedNote.setFont(Theme.regular(12.5f));
+        detachedNote.setForeground(Theme.TEXT_MUTED);
+        gaugeSlot.setOpaque(false);
+        gaugeSlot.add(attachedGaugeHolder, "attached");
+        gaugeSlot.add(detachedNote, "detached");
 
         var constraints = new GridBagConstraints();
         constraints.gridx = 0;
         constraints.gridy = 0;
-        constraints.gridwidth = 2;
         constraints.weightx = 1;
         constraints.fill = GridBagConstraints.HORIZONTAL;
-        hero.add(gauge, constraints);
+        hero.add(gaugeSlot, constraints);
+
+        detachButton.addActionListener(e -> detachGauge());
+        attachButton.addActionListener(e -> attachGauge());
+        attachButton.setVisible(false);
+        var corner = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        corner.setOpaque(false);
+        corner.add(detachButton);
+        corner.add(attachButton);
+        constraints.gridx = 1;
+        constraints.weightx = 0;
+        constraints.fill = GridBagConstraints.NONE;
+        constraints.anchor = GridBagConstraints.NORTHEAST;
+        hero.add(corner, constraints);
 
         pendingChanges.setVisible(false);
         var messages = new JPanel();
@@ -168,29 +200,170 @@ public class MainWindow
         statusMessage.setAlignmentX(Component.LEFT_ALIGNMENT);
         pendingChanges.setAlignmentX(Component.LEFT_ALIGNMENT);
 
+        constraints.gridx = 0;
         constraints.gridy = 1;
-        constraints.gridwidth = 1;
-        constraints.insets = new Insets(16, 0, 0, 12);
+        constraints.gridwidth = 2;
+        constraints.weightx = 1;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
         constraints.anchor = GridBagConstraints.WEST;
+        constraints.insets = new Insets(14, 0, 0, 0);
         hero.add(messages, constraints);
 
         startStopButton.addActionListener(e -> onStartStop());
         applyButton.setGlyph(ModernButton.Glyph.REFRESH);
         applyButton.setVisible(false);
-        applyButton.setToolTipText(Theme.tooltip("Restarts with the changed settings. The device stays connected."));
         applyButton.addActionListener(e -> applyChanges());
+        testModeButton.addActionListener(e -> openTestMode());
         var buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         buttons.setOpaque(false);
         buttons.add(applyButton);
+        buttons.add(testModeButton);
         buttons.add(startStopButton);
 
-        constraints.gridx = 1;
-        constraints.weightx = 0;
+        constraints.gridy = 2;
         constraints.fill = GridBagConstraints.NONE;
-        constraints.insets = new Insets(16, 0, 0, 0);
         constraints.anchor = GridBagConstraints.EAST;
+        constraints.insets = new Insets(12, 0, 0, 0);
         hero.add(buttons, constraints);
         return hero;
+    }
+
+    /** Moves the gauge into its own small window, which stays above the other windows unless unpinned. */
+    private void detachGauge()
+    {
+        if (gaugeWindow != null)
+        {
+            gaugeWindow.toFront();
+            return;
+        }
+        attachedGaugeHolder.remove(gauge);
+        gauge.setDetached(true);
+        gaugeSlots.show(gaugeSlot, "detached");
+        detachButton.setVisible(false);
+        attachButton.setVisible(true);
+
+        gaugeWindow = new JFrame("Penetration value");
+        gaugeWindow.setIconImages(appIcons());
+        gaugeWindow.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        gaugeWindow.addWindowListener(new WindowAdapter()
+        {
+            @Override
+            public void windowClosing(WindowEvent e)
+            {
+                attachGauge();
+            }
+        });
+        gaugeWindow.setAlwaysOnTop(true);
+
+        var pin = new IconButton(IconButton.Glyph.PIN, "Keeps this window above all other windows. Click to turn it off.");
+        pin.setToggled(true);
+        pin.addActionListener(e ->
+        {
+            boolean onTop = !gaugeWindow.isAlwaysOnTop();
+            gaugeWindow.setAlwaysOnTop(onTop);
+            pin.setToggled(onTop);
+        });
+        var attach = new IconButton(IconButton.Glyph.ATTACH, "Puts the penetration value back into the main window.");
+        attach.addActionListener(e -> attachGauge());
+        var bar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        bar.setOpaque(false);
+        bar.add(pin);
+        bar.add(attach);
+
+        var content = new JPanel(new BorderLayout(0, 4));
+        content.setBackground(Theme.BACKGROUND);
+        content.setBorder(BorderFactory.createEmptyBorder(6, 10, 12, 10));
+        content.add(bar, BorderLayout.NORTH);
+        content.add(gauge, BorderLayout.CENTER);
+        gaugeWindow.setContentPane(content);
+        gaugeWindow.setMinimumSize(new Dimension(110, 220));
+        if (gaugeWindowBounds != null)
+        {
+            gaugeWindow.setBounds(gaugeWindowBounds);
+        }
+        else
+        {
+            gaugeWindow.setSize(Math.round(170 * Theme.FONT_SCALE), Math.round(330 * Theme.FONT_SCALE));
+            Rectangle main = frame.getBounds();
+            Rectangle screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+            int x = main.x + main.width + 8;
+            gaugeWindow.setLocation(x + gaugeWindow.getWidth() <= screen.x + screen.width ? x
+                    : Math.max(screen.x, main.x - gaugeWindow.getWidth() - 8), main.y);
+        }
+        gaugeWindow.setVisible(true);
+    }
+
+    /** Puts the gauge back into the main window and closes its own window. */
+    private void attachGauge()
+    {
+        if (gaugeWindow == null)
+        {
+            return;
+        }
+        gaugeWindowBounds = gaugeWindow.getBounds();
+        gaugeWindow.getContentPane().remove(gauge);
+        gaugeWindow.dispose();
+        gaugeWindow = null;
+        gauge.setDetached(false);
+        attachedGaugeHolder.add(gauge, BorderLayout.CENTER);
+        gaugeSlots.show(gaugeSlot, "attached");
+        detachButton.setVisible(true);
+        attachButton.setVisible(false);
+        attachedGaugeHolder.revalidate();
+        attachedGaugeHolder.repaint();
+    }
+
+    /** Opens the test mode window and starts a test session (a running session is stopped first). */
+    private void openTestMode()
+    {
+        if (testWindow != null && !testWindow.isClosed())
+        {
+            testWindow.toFront();
+            return;
+        }
+        flushPendingSave();
+        testWindow = new TestModeWindow(settings.getConfig().spsType(),
+                part -> startTest(),
+                stop ->
+                {
+                    if (stop)
+                    {
+                        controller.stop();
+                    }
+                    else
+                    {
+                        startTest();
+                    }
+                },
+                controller::feedTestInput);
+        testWindow.show(frame, () ->
+        {
+            testWindow = null;
+            controller.stop();
+        });
+        startTest();
+    }
+
+    private void startTest()
+    {
+        ConfigProperties config = effectiveConfig();
+        String error = config.validate();
+        if (error != null)
+        {
+            showStatus(new AppController.Status(AppController.State.ERROR, error, true));
+            return;
+        }
+        appliedConfig = config;
+        controller.startTest(config);
+    }
+
+    /** The settings, with the SPS type of the test mode window while it is open. */
+    private ConfigProperties effectiveConfig()
+    {
+        ConfigProperties config = settings.getConfig();
+        return testWindow != null && !testWindow.isClosed()
+                ? config.toBuilder().spsType(testWindow.getMovedPart()).build()
+                : config;
     }
 
     private JComponent buildFooter()
@@ -198,9 +371,7 @@ public class MainWindow
         footer.setFont(Theme.regular(11.5f));
         footer.setForeground(Theme.TEXT_MUTED);
         footer.setBorder(BorderFactory.createEmptyBorder(8, 18, 10, 18));
-        footer.setText("Settings are saved automatically");
-        footer.setToolTipText(Theme.tooltip("Saved to " + configLoader.getPath().toAbsolutePath()
-                + ". Details about what the app does are written to the console and the log files."));
+        footer.setText("Settings are saved automatically to " + configLoader.getPath().getFileName());
         return footer;
     }
 
@@ -233,7 +404,7 @@ public class MainWindow
     private void applyChanges()
     {
         flushPendingSave();
-        ConfigProperties config = settings.getConfig();
+        ConfigProperties config = effectiveConfig();
         String error = config.validate();
         if (error != null)
         {
@@ -247,6 +418,8 @@ public class MainWindow
 
     private void onSettingsChanged(ConfigProperties config)
     {
+        // The logging level applies right away, it needs no restart
+        ConfigLoader.setLoggingLevel(Level.toLevel(config.logLevel(), Level.INFO));
         saveTimer.restart();
         updatePendingChanges();
     }
@@ -266,7 +439,7 @@ public class MainWindow
         {
             configLoader.save(settings.getConfig());
             footer.setForeground(Theme.TEXT_MUTED);
-            footer.setText("Settings are saved automatically");
+            footer.setText("Settings are saved automatically to " + configLoader.getPath().getFileName());
         }
         catch (IOException e)
         {
@@ -279,7 +452,16 @@ public class MainWindow
     private void showStatus(AppController.Status newStatus)
     {
         status = newStatus;
-        statusPill.setState(newStatus.state());
+        statusPill.setState(newStatus.state(), newStatus.testMode());
+        if (testWindow != null)
+        {
+            testWindow.showStatus(newStatus);
+            if (testWindow.isClosed())
+            {
+                testWindow = null;
+            }
+        }
+        testModeButton.setEnabled(newStatus.state() != AppController.State.CONNECTING);
         gauge.setActive(newStatus.state() == AppController.State.RUNNING);
         showMessage(newStatus.message(), newStatus.state() == AppController.State.ERROR);
 
@@ -291,8 +473,6 @@ public class MainWindow
                 startStopButton.setGlyph(ModernButton.Glyph.PLAY);
                 startStopButton.setStyle(ModernButton.Style.PRIMARY);
                 startStopButton.setEnabled(true);
-                startStopButton.setToolTipText(Theme.tooltip(
-                        "Connects to your Handy over Bluetooth and starts following your avatar."));
             }
             case CONNECTING ->
             {
@@ -306,8 +486,6 @@ public class MainWindow
                 startStopButton.setGlyph(ModernButton.Glyph.STOP);
                 startStopButton.setStyle(ModernButton.Style.SECONDARY);
                 startStopButton.setEnabled(true);
-                startStopButton.setToolTipText(Theme.tooltip(
-                        "Stops moving the device. It stays connected, so starting again is quick."));
             }
         }
         updatePendingChanges();
@@ -321,8 +499,10 @@ public class MainWindow
 
     private void updatePendingChanges()
     {
+        // The logging level applies right away, so it is no pending change
         boolean pending = status.state() == AppController.State.RUNNING && appliedConfig != null
-                && !appliedConfig.equals(settings.getConfig());
+                && !appliedConfig.toBuilder().logLevel(null).build()
+                        .equals(effectiveConfig().toBuilder().logLevel(null).build());
         pendingChanges.setVisible(pending);
         applyButton.setVisible(pending);
     }
@@ -330,6 +510,14 @@ public class MainWindow
     private void exit()
     {
         flushPendingSave();
+        if (testWindow != null)
+        {
+            testWindow.close();
+        }
+        if (gaugeWindow != null)
+        {
+            gaugeWindow.dispose();
+        }
         frame.setVisible(false);
         // Stopping waits for the device to be stopped and disconnected, which must not block the event thread
         Thread exitThread = new Thread(() ->

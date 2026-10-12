@@ -3,6 +3,7 @@ package org.example;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigLoader;
 import org.example.config.ConfigProperties;
+import org.example.gui.LogCapture;
 import org.example.gui.MainWindow;
 import org.example.gui.Theme;
 import org.example.update.StartupUpdateCheck;
@@ -17,6 +18,7 @@ public class Main
     public static void main(String[] args)
     {
         Theme.prepareRendering(); // Has to happen before the first window is created
+        LogCapture.install(); // Before anything is logged, so that the Logs tab shows the startup as well
         try
         {
             var configLoader = new ConfigLoader(getAppConfigPath());

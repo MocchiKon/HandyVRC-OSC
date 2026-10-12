@@ -24,6 +24,8 @@ public class SettingsPanel extends JPanel
 {
     private static final String BASIC = "basic";
     private static final String ADVANCED = "advanced";
+    private static final String LOGS = "logs";
+    private static final List<String> LOG_LEVELS = List.of("TRACE", "DEBUG", "INFO", "WARN", "ERROR");
 
     private ConfigProperties config;
     private final Consumer<ConfigProperties> changeListener;
@@ -42,6 +44,7 @@ public class SettingsPanel extends JPanel
     private final ModernSlider fullyPenetratedAt = new ModernSlider(10, 100, 1, 85);
     private final ToggleSwitch useOscQuery = new ToggleSwitch(true);
     private final ModernTextField listenOnPort = new ModernTextField("", 6);
+    private final JLabel listenOnPortHint = new JLabel("Picked automatically while OSCQuery is on");
 
     // Advanced
     private final WrappingText advancedModeHint = new WrappingText("", Theme.regular(12.5f), Theme.TEXT_MUTED);
@@ -59,6 +62,16 @@ public class SettingsPanel extends JPanel
     private final ToggleSwitch pauseOnStarving = new ToggleSwitch(false);
     private final ModernSlider sendMessageEvery = new ModernSlider(0, 200, 5, 0);
     private final ToggleSwitch checkForUpdates = new ToggleSwitch(true);
+    private final SegmentedControl<String> logLevel = new SegmentedControl<>(List.of(
+            new SegmentedControl.Option<>("TRACE", "Trace",
+                    "Everything, including every value received from VRChat. Very detailed; slows the app down a little."),
+            new SegmentedControl.Option<>("DEBUG", "Debug",
+                    "Details of what the selected mode does (for example every command sent to the device). Useful"
+                            + " for tuning the Advanced settings."),
+            new SegmentedControl.Option<>("INFO", "Info", "Normal messages: connection, settings, problems. Default."),
+            new SegmentedControl.Option<>("WARN", "Warn", "Only warnings and errors."),
+            new SegmentedControl.Option<>("ERROR", "Error", "Only errors.")),
+            "INFO", true);
 
     private final CardLayout pages = new CardLayout();
     private final JPanel pageHolder = new JPanel(pages);
@@ -90,7 +103,9 @@ public class SettingsPanel extends JPanel
         var tabs = new SegmentedControl<>(List.of(
                 new SegmentedControl.Option<>(BASIC, "Basic", "The settings most people need."),
                 new SegmentedControl.Option<>(ADVANCED, "Advanced",
-                        "Fine tuning of the selected mode. The defaults work well for most people.")),
+                        "Fine tuning of the selected mode. The defaults work well for most people."),
+                new SegmentedControl.Option<>(LOGS, "Logs",
+                        "What the app is doing, as it happens. Useful when something does not work.")),
                 BASIC, true);
         tabs.setSelectionListener(page -> pages.show(pageHolder, page));
         add(tabs, BorderLayout.NORTH);
@@ -98,6 +113,7 @@ public class SettingsPanel extends JPanel
         pageHolder.setOpaque(false);
         pageHolder.add(scrollable(buildBasicPage()), BASIC);
         pageHolder.add(scrollable(buildAdvancedPage()), ADVANCED);
+        pageHolder.add(new LogsPanel(() -> config.logLevel()), LOGS);
         add(pageHolder, BorderLayout.CENTER);
 
         installListeners();
@@ -146,6 +162,8 @@ public class SettingsPanel extends JPanel
             pauseOnStarving.setSelected(newConfig.pauseOnStarving());
             sendMessageEvery.setValue(newConfig.sendMessageEveryMs());
             checkForUpdates.setSelected(newConfig.checkForUpdates());
+            String level = newConfig.logLevel() == null ? "INFO" : newConfig.logLevel().toUpperCase(java.util.Locale.ROOT);
+            logLevel.setSelected(LOG_LEVELS.contains(level) ? level : "INFO");
         }
         finally
         {
@@ -173,6 +191,11 @@ public class SettingsPanel extends JPanel
         directSection.setVisible(!smoothed);
         advancedModeHint.setText("Options of %s mode (the mode is selected on the Basic tab)."
                 .formatted(config.processingAlgorithm().getLabel()));
+
+        // With OSCQuery the app picks a free port itself; the configured one is only the fallback when OSCQuery
+        // cannot be started, so it is only editable when OSCQuery is off
+        listenOnPort.setEnabled(!config.useOscQuery());
+        listenOnPortHint.setVisible(config.useOscQuery());
 
         boolean custom = customAvatarParameter.isSelected();
         avatarParameter.setEnabled(custom);
@@ -262,6 +285,7 @@ public class SettingsPanel extends JPanel
         pauseOnStarving.addChangeListener(e -> update(b -> b.pauseOnStarving(pauseOnStarving.isSelected())));
         sendMessageEvery.addChangeListener(e -> update(b -> b.sendMessageEveryMs(sendMessageEvery.getValue())));
         checkForUpdates.addChangeListener(e -> update(b -> b.checkForUpdates(checkForUpdates.isSelected())));
+        logLevel.setSelectionListener(value -> update(b -> b.logLevel(value)));
     }
 
     /** A blank custom parameter means "use the default", so the check box alone changes nothing. */
@@ -309,7 +333,7 @@ public class SettingsPanel extends JPanel
 
         var movement = section("Movement");
         addRow(movement, controlRow("Mode",
-                "How the movement of your avatar is turned into device movement. Hover over a mode for details.",
+                "How the movement of your avatar is turned into device movement.",
                 algorithm));
         addRow(movement, rangeRow("Stroke range",
                 "The part of the stroke the device uses: drag the left handle to raise the bottom, the right handle"
@@ -333,9 +357,14 @@ public class SettingsPanel extends JPanel
         var portHolder = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         portHolder.setOpaque(false);
         portHolder.add(listenOnPort);
+        portHolder.add(Box.createHorizontalStrut(12));
+        listenOnPortHint.setFont(Theme.regular(12f));
+        listenOnPortHint.setForeground(Theme.TEXT_MUTED);
+        portHolder.add(listenOnPortHint);
         addRow(osc, controlRow("OSC port",
-                "Port VRChat sends OSC messages to (9001 unless you changed it in VRChat). Only used when OSCQuery is"
-                        + " turned off or could not be started.",
+                "Port VRChat sends OSC messages to (9001 unless you changed it in VRChat). Only editable while"
+                        + " 'Use OSCQuery' is off: with OSCQuery the app picks a free port itself and tells VRChat about"
+                        + " it, and this port is only used if OSCQuery cannot be started.",
                 portHolder));
         page.add(osc);
         page.add(Box.createVerticalStrut(12));
@@ -416,6 +445,9 @@ public class SettingsPanel extends JPanel
                 "Checks GitHub on startup whether a newer version was released and lets you know. The check runs in"
                         + " the background and never blocks the app.",
                 checkForUpdates));
+        addRow(general, controlRow("Logging level",
+                "How detailed the messages on the Logs tab and in the log files are. Applies right away.",
+                logLevel));
         page.add(general);
         page.add(Box.createVerticalStrut(12));
         page.add(restoreDefaultsButton(defaults -> config.toBuilder()
@@ -430,6 +462,7 @@ public class SettingsPanel extends JPanel
                 .pauseOnStarving(defaults.pauseOnStarving())
                 .sendMessageEveryMs(defaults.sendMessageEveryMs())
                 .checkForUpdates(defaults.checkForUpdates())
+                .logLevel(defaults.logLevel())
                 .build()));
         return page;
     }
@@ -437,7 +470,6 @@ public class SettingsPanel extends JPanel
     private JComponent restoreDefaultsButton(java.util.function.Function<ConfigProperties, ConfigProperties> reset)
     {
         var button = new ModernButton("Restore defaults", ModernButton.Style.GHOST);
-        button.setToolTipText(Theme.tooltip("Resets the settings on this tab to their default values."));
         button.addActionListener(e ->
         {
             ConfigProperties restored = reset.apply(ConfigProperties.defaults());

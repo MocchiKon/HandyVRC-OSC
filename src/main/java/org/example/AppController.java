@@ -24,6 +24,9 @@ import java.util.function.IntConsumer;
  * Starts and stops the app on request of the GUI: connects the Handy over Bluetooth, opens the OSC port (announced
  * to VRChat over OSCQuery), and runs the processor that turns the avatar parameters into device commands.
  * <p>
+ * In test mode the avatar parameters do not come from VRChat but from the GUI ({@link #feedTestInput}), so the
+ * mode and the connection to the device can be tried out without VRChat.
+ * <p>
  * Every operation runs on one background thread, in the order it was requested, so the GUI never blocks (scanning
  * for the device can take several seconds) and two operations can never interfere with each other. The Bluetooth
  * connection is kept when the app is stopped or restarted with new settings, so applying a setting is quick.
@@ -32,14 +35,28 @@ import java.util.function.IntConsumer;
 public class AppController implements AutoCloseable
 {
     private static final long CONNECTION_CHECK_INTERVAL_MS = 2_000;
+    /**
+     * Length (in the 0-1 proximity units of SPS) of the penetrator simulated in test mode in ORIFICE mode. Only its
+     * root and tip proximity reach the processor, which detects the length from them like it does for a real one.
+     */
+    static final float TEST_PENETRATOR_LENGTH = 0.1f;
 
     public enum State
     {
         STOPPED, CONNECTING, RUNNING, ERROR
     }
 
-    /** @param message what is going on, for the user */
-    public record Status(State state, String message) {}
+    /**
+     * @param message  what is going on, for the user
+     * @param testMode whether the session is (or was being) started in test mode
+     */
+    public record Status(State state, String message, boolean testMode)
+    {
+        public Status(State state, String message)
+        {
+            this(state, message, false);
+        }
+    }
 
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor(runnable ->
     {
@@ -61,6 +78,11 @@ public class AppController implements AutoCloseable
     private Runnable unregisterParameterListener;
     private VrchatParameterScanner scanner;
     private Consumer<OscQueryServiceProfile> scannerDiscoveryListener;
+    /** True while a test mode session is started or running. */
+    private volatile boolean testMode;
+    /** The processor of a running test mode session (null otherwise), fed by {@link #feedTestInput}. */
+    private volatile ParameterProcessor testProcessor;
+    private volatile SpsType testSpsType;
 
     /**
      * @param statusListener   notified (on a background thread) whenever the status changes
@@ -88,8 +110,54 @@ public class AppController implements AutoCloseable
             {
                 return;
             }
-            startSession(config);
+            startSession(config, false);
         });
+    }
+
+    /**
+     * Starts test mode: like {@link #start}, but instead of listening for VRChat the movement is taken from
+     * {@link #feedTestInput}. A running session (normal or test) is stopped first.
+     *
+     * @param config the settings, with the SPS type the user wants to test
+     */
+    public void startTest(ConfigProperties config)
+    {
+        worker.execute(() ->
+        {
+            stopSession(true);
+            startSession(config, true);
+        });
+    }
+
+    /**
+     * Moves the device in test mode. Ignored unless a test mode session is running.
+     *
+     * @param insertion how deep the penetrator is inside the orifice, 0 (outside) to 1 (fully inside)
+     */
+    public void feedTestInput(float insertion)
+    {
+        ParameterProcessor processor = testProcessor;
+        if (processor == null)
+        {
+            return;
+        }
+        float depth = Math.clamp(insertion, 0f, 1f);
+        if (testSpsType == SpsType.PENETRATOR)
+        {
+            processor.actOnValueChange(depth);
+            return;
+        }
+        float rootProximity = testRootProximity(depth);
+        processor.actOnProximityChange(rootProximity, rootProximity + TEST_PENETRATOR_LENGTH);
+    }
+
+    /**
+     * @return the root proximity SPS reports for a penetrator of {@link #TEST_PENETRATOR_LENGTH} that is inserted
+     * this deep (0-1); its tip proximity is this plus the length
+     */
+    static float testRootProximity(float depth)
+    {
+        return 1f - (1f - depth) * TEST_PENETRATOR_LENGTH;
     }
 
     /** Applies new settings: a running session is restarted with them, the Bluetooth connection is kept. */
@@ -101,8 +169,9 @@ public class AppController implements AutoCloseable
             {
                 return;
             }
+            boolean test = testMode;
             stopSession(false);
-            startSession(config);
+            startSession(config, test);
         });
     }
 
@@ -111,6 +180,7 @@ public class AppController implements AutoCloseable
         worker.execute(() ->
         {
             stopSession(true);
+            testMode = false;
             setStatus(State.STOPPED, "Stopped");
         });
     }
@@ -138,8 +208,9 @@ public class AppController implements AutoCloseable
         }
     }
 
-    private void startSession(ConfigProperties config)
+    private void startSession(ConfigProperties config, boolean test)
     {
+        testMode = test;
         String configError = config.validate();
         if (configError != null)
         {
@@ -160,6 +231,17 @@ public class AppController implements AutoCloseable
                 case HDSP_SMOOTHED -> new HdspSmoothedParameterProcessor(client, config);
             };
             processor.setValueChangeListener(positionListener::accept);
+            if (test)
+            {
+                processor.run();
+                testSpsType = config.spsType();
+                testProcessor = processor;
+                log.info("Test mode running ({} mode, moving the {})", config.processingAlgorithm().getLabel(),
+                        config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice");
+                setStatus(State.RUNNING, "Test mode: move the %s in the Test mode window to move your Handy."
+                        .formatted(config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice"));
+                return;
+            }
 
             setStatus(State.CONNECTING, "Opening the OSC port...");
             openOscEndpoint(config);
@@ -184,6 +266,7 @@ public class AppController implements AutoCloseable
      */
     private void stopSession(boolean closeOsc)
     {
+        testProcessor = null;
         if (unregisterParameterListener != null)
         {
             unregisterParameterListener.run();
@@ -353,7 +436,7 @@ public class AppController implements AutoCloseable
 
     private void setStatus(State state, String message)
     {
-        status = new Status(state, message);
+        status = new Status(state, message, testMode);
         try
         {
             statusListener.accept(status);

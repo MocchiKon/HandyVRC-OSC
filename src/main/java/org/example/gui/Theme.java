@@ -38,6 +38,7 @@ public final class Theme
 
     public static final Color ERROR = new Color(0xFF6B81);
     public static final Color ERROR_BACKGROUND = new Color(0x3A1730);
+    public static final Color WARNING = new Color(0xFFC46B);
 
     public static final int RADIUS = 14;
     public static final int CONTROL_RADIUS = 10;
@@ -61,7 +62,7 @@ public final class Theme
      * Every font size of the GUI is multiplied by this, so the text size can be tuned in one place. The sizes in the
      * code are the compact design sizes, which were too small to read comfortably.
      */
-    public static final float FONT_SCALE = 1.3f;
+    public static final float FONT_SCALE = 1.45f;
 
     public static Font font(int style, float size)
     {
@@ -76,6 +77,27 @@ public final class Theme
     public static Font bold(float size)
     {
         return font(Font.BOLD, size);
+    }
+
+    private static final List<String> PREFERRED_MONO_FONTS =
+            List.of("JetBrains Mono", "Cascadia Mono", "Consolas", "SF Mono", "Ubuntu Mono", "DejaVu Sans Mono");
+    private static String monoFontFamily;
+
+    /** Monospaced font (for the logs). */
+    public static Font mono(float size)
+    {
+        return new Font(monoFontFamily(), Font.PLAIN, 1).deriveFont(size * FONT_SCALE);
+    }
+
+    private static synchronized String monoFontFamily()
+    {
+        if (monoFontFamily == null)
+        {
+            Set<String> available = Set.copyOf(Arrays.asList(
+                    GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+            monoFontFamily = PREFERRED_MONO_FONTS.stream().filter(available::contains).findFirst().orElse(Font.MONOSPACED);
+        }
+        return monoFontFamily;
     }
 
     private static synchronized String fontFamily()
@@ -114,7 +136,7 @@ public final class Theme
         UIManager.put("TextField.selectionBackground", new ColorUIResource(ACCENT_DARK));
         UIManager.put("TextField.selectionForeground", new ColorUIResource(TEXT));
 
-        ToolTipManager.sharedInstance().setInitialDelay(350);
+        ToolTipManager.sharedInstance().setInitialDelay(200);
         ToolTipManager.sharedInstance().setReshowDelay(100);
         ToolTipManager.sharedInstance().setDismissDelay(30_000);
     }

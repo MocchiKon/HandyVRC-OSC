@@ -8,7 +8,7 @@ import java.awt.geom.RoundRectangle2D;
 /** Check box with a rounded box that is filled with the accent color and a white check mark when checked. */
 public class ModernCheckBox extends JCheckBox
 {
-    private static final int BOX = 18;
+    private static final int BOX = 21;
 
     public ModernCheckBox(String text)
     {
@@ -38,9 +38,9 @@ public class ModernCheckBox extends JCheckBox
                 g.setColor(enabled ? (model.isRollover() ? Theme.ACCENT_LIGHT : Theme.ACCENT) : Theme.TEXT_DISABLED);
                 g.fill(box);
                 var check = new Path2D.Float();
-                check.moveTo(x + 4.5f, y + 9.5f);
-                check.lineTo(x + 7.8f, y + 12.8f);
-                check.lineTo(x + 13.5f, y + 5.5f);
+                check.moveTo(x + BOX * 0.25f, y + BOX * 0.53f);
+                check.lineTo(x + BOX * 0.43f, y + BOX * 0.71f);
+                check.lineTo(x + BOX * 0.75f, y + BOX * 0.31f);
                 g.setColor(Theme.TEXT);
                 g.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                 g.draw(check);

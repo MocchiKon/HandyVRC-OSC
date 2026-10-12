@@ -121,6 +121,11 @@ final class SettingRows
     /** Name on the first line, the control (stretched to the full width) below. */
     static JPanel controlRow(String name, String tooltip, JComponent control)
     {
+        if (control instanceof SegmentedControl<?> options)
+        {
+            // The options are explained in the info tooltip of the row, not when hovering over them
+            tooltip = tooltip + "\n\n" + options.describeOptions();
+        }
         var row = verticalRow();
         row.add(title(name));
         row.add(Box.createVerticalStrut(8));
@@ -156,12 +161,15 @@ final class SettingRows
         return row;
     }
 
-    /** Sets the tooltip on a component and everything inside it, so it shows wherever the row is hovered. */
+    /**
+     * Sets the explanation of a setting on the info icon(s) inside it. Only the icon shows it: a tooltip on the
+     * name, the value and the control as well would pop up (and move along) wherever the mouse goes.
+     */
     static void applyTooltip(Component component, String tooltip)
     {
-        if (component instanceof JComponent jComponent)
+        if (component instanceof InfoIcon icon)
         {
-            jComponent.setToolTipText(tooltip);
+            icon.setToolTipText(tooltip);
         }
         if (component instanceof Container container)
         {

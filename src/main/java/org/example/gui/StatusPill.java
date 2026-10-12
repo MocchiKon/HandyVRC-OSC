@@ -11,6 +11,7 @@ import java.awt.geom.RoundRectangle2D;
 public class StatusPill extends JComponent
 {
     private AppController.State state = AppController.State.STOPPED;
+    private boolean testMode;
     private float pulse;
     private final Timer pulseTimer;
 
@@ -25,9 +26,10 @@ public class StatusPill extends JComponent
         });
     }
 
-    public void setState(AppController.State state)
+    public void setState(AppController.State state, boolean testMode)
     {
         this.state = state;
+        this.testMode = testMode;
         if (state == AppController.State.CONNECTING || state == AppController.State.RUNNING)
         {
             pulseTimer.start();
@@ -46,7 +48,7 @@ public class StatusPill extends JComponent
         {
             case STOPPED -> "Stopped";
             case CONNECTING -> "Connecting";
-            case RUNNING -> "Running";
+            case RUNNING -> testMode ? "Test mode" : "Running";
             case ERROR -> "Error";
         };
     }

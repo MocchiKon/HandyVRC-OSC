@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 public class SegmentedControl<T> extends JComponent
 {
     /**
-     * @param tooltip shown when hovering over this option (null to fall back to the tooltip of the whole control)
+     * @param tooltip explanation of the option, shown in the info tooltip of the setting (null for none)
      */
     public record Option<T>(T value, String label, String tooltip) {}
 
@@ -33,7 +33,6 @@ public class SegmentedControl<T> extends JComponent
         setFocusable(true);
         setFont(Theme.bold(compact ? 12.5f : 13f));
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        ToolTipManager.sharedInstance().registerComponent(this);
         installListeners();
     }
 
@@ -90,15 +89,13 @@ public class SegmentedControl<T> extends JComponent
         return Math.min(options.size() - 1, x * options.size() / Math.max(1, getWidth()));
     }
 
-    @Override
-    public String getToolTipText(MouseEvent event)
+    /** @return every option with its explanation ("Label: explanation"), one per line */
+    public String describeOptions()
     {
-        int index = indexAt(event.getX());
-        if (index >= 0 && options.get(index).tooltip() != null)
-        {
-            return Theme.tooltip(options.get(index).tooltip());
-        }
-        return super.getToolTipText(event);
+        return options.stream()
+                .filter(option -> option.tooltip() != null)
+                .map(option -> option.label() + ": " + option.tooltip())
+                .collect(java.util.stream.Collectors.joining("\n\n"));
     }
 
     private void installListeners()

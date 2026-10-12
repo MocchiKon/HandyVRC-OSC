@@ -22,7 +22,16 @@ the changed settings without reconnecting the device. Details are printed to the
 The **Basic** tab holds what most people need: the SPS type (Penetrator/Orifice), the avatar parameter (the default
 for the SPS type unless you check "Use a custom avatar parameter"), the mode, the stroke range, "Fully penetrated
 at" (default 85%) and the VRChat connection (OSCQuery and the OSC port). The **Advanced** tab only shows the fine
-tuning options of the selected mode.
+tuning options of the selected mode, plus the logging level. The **Logs** tab shows what the app is doing as it
+happens (the same messages also go to the log files in the `logs` folder).
+
+* The button in the corner of the penetration value moves it into its own small window (kept above other windows
+  unless you unpin it), for example to keep it next to VRChat; the button in that window puts it back.
+* **Test mode** opens a window in which you drag a penetrator or an orifice yourself (or let it stroke on its own),
+  to try the mode, its settings and the connection to your Handy without VRChat. It uses all the settings of the
+  main window, only the SPS type is taken from the part you choose to move. Choose "Penetrator" to test the
+  Penetrator SPS type (you move the penetrator) or "Orifice" to test the Orifice SPS type (you move the orifice, and
+  the penetrator length detection is tested as well).
 
 The mode selects how the movement is sent to the device (both use HDSP, the Handy Direct Streaming Protocol):
 * **Direct** streams every position to the device as it arrives (1:1), filtered by "Minimal value change".
