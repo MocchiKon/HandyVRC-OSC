@@ -9,50 +9,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConfigPropertiesTest
 {
     @Test
-    void toLoggableStringMasksDeviceConnectionKeyAndHandyApplicationId()
+    void defaultsUseSmoothedModeAndTheDefaultAvatarParameter()
     {
-        var config = ConfigProperties.builder()
-                .deviceConnectionKey("Abc123Key")
-                .handyApplicationId("Xyz987App")
-                .avatarParameter("/avatar/parameters/OGB/Pen/*/PenOthers")
-                .processingAlgorithm(ParameterProcessorType.HSP)
-                .connectionMode(ConnectionMode.API)
-                .testMode(false)
-                .savePointsToFile(false)
-                .clamp(true)
-                .pauseOnStarving(false)
-                .handyApiVersion(3)
-                .listenOnPort(9001)
-                .waitForApiResponse(true)
-                .pointsOffset(5)
-                .sendMessageEveryMs(200)
-                .minimalValueChange(2)
-                .sliderMin(0.0f)
-                .sliderMax(1.0f)
-                .spsType(SpsType.PENETRATOR)
-                .build();
+        var defaults = ConfigProperties.defaults();
 
-        var loggable = config.toLoggableString();
-
-        assertThat(loggable)
-                .doesNotContain("Abc123Key")
-                .doesNotContain("Xyz987App")
-                .contains("deviceConnectionKey='A***'")
-                .contains("handyApplicationId='X***'")
-                .contains("avatarParameter='/avatar/parameters/OGB/Pen/*/PenOthers'")
-                .contains("connectionMode=API")
-                .contains("spsType=PENETRATOR");
+        assertThat(defaults.processingAlgorithm()).isEqualTo(ParameterProcessorType.HDSP_SMOOTHED);
+        assertThat(defaults.fullyPenetratedAtValue()).isEqualTo(85f);
+        assertThat(defaults.customAvatarParameter()).isFalse();
+        assertThat(defaults.avatarParameter()).isEqualTo(ConfigProperties.defaultAvatarParameter(defaults.spsType()));
+        assertThat(defaults.validate()).isNull();
     }
 
     @Test
-    void toLoggableStringKeepsNullSensitiveValuesUntouched()
+    void tipParameterIsOnlyDerivedForOrifice()
     {
-        var config = ConfigProperties.builder()
-                .connectionMode(ConnectionMode.BLUETOOTH)
+        String root = "/avatar/parameters/OGB/Orf/*/PenOthersNewRoot";
+
+        assertThat(ConfigProperties.penetratorTipParameter(SpsType.ORIFICE, root))
+                .isEqualTo("/avatar/parameters/OGB/Orf/*/PenOthersNewTip");
+        assertThat(ConfigProperties.penetratorTipParameter(SpsType.PENETRATOR, root)).isNull();
+    }
+
+    @Test
+    void emptyAvatarParameterIsInvalid()
+    {
+        assertThat(ConfigProperties.validateAvatarParameter(SpsType.PENETRATOR, " ")).isNotNull();
+    }
+
+    @Test
+    void toLoggableStringContainsTheSettings()
+    {
+        var config = ConfigProperties.defaults().toBuilder()
+                .avatarParameter("/avatar/parameters/OGB/Pen/*/PenOthers")
                 .build();
 
         assertThat(config.toLoggableString())
-                .contains("deviceConnectionKey='null'")
-                .contains("handyApplicationId='null'");
+                .contains("avatarParameter=/avatar/parameters/OGB/Pen/*/PenOthers")
+                .contains("spsType=PENETRATOR");
     }
 }

@@ -124,9 +124,8 @@ class VrchatParameterScannerTest
     {
         return ConfigProperties.builder()
                 .avatarParameter("/avatar/parameters/OGB/Orf/*/PenOthersNewRoot")
-                .penetratorTipParameter("/avatar/parameters/OGB/Orf/*/PenOthersNewTip")
                 .spsType(SpsType.ORIFICE)
-                .processingAlgorithm(ParameterProcessorType.HSP)
+                .processingAlgorithm(ParameterProcessorType.HDSP)
                 .sendMessageEveryMs(0)
                 .build();
     }

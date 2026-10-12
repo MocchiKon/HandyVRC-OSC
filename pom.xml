@@ -55,16 +55,6 @@
             <version>2.18.2</version>
         </dependency>
         <dependency>
-            <groupId>jakarta.annotation</groupId>
-            <artifactId>jakarta.annotation-api</artifactId>
-            <version>2.1.1</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>2.18.2</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
             <version>3.18.0</version>
@@ -100,8 +90,7 @@
 
         <!--
             version.properties carries the project version into the application so that the update check can compare it
-            with the newest GitHub release. Only that file is filtered: app.properties has to stay untouched because it
-            is copied to the user directory as the editable config template.
+            with the newest GitHub release. Only that file is filtered, every other resource is copied as it is.
         -->
         <resources>
             <resource>
@@ -155,67 +144,6 @@
                                     </manifestEntries>
                                 </transformer>
                             </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <!-- Open API -->
-            <plugin>
-                <groupId>org.openapitools</groupId>
-                <artifactId>openapi-generator-maven-plugin</artifactId>
-                <version>7.25.0</version>
-                <executions>
-                    <execution>
-                        <id>generate-openapi</id>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>generate</goal>
-                        </goals>
-                        <configuration>
-                            <inputSpec>${project.basedir}/src/main/api/spec.yaml</inputSpec>
-                            <output>${project.build.directory}/generated-sources/openapi</output>
-                            <apiPackage>handy.api</apiPackage>
-                            <modelPackage>handy.model</modelPackage>
-                            <invokerPackage>handy.invoker</invokerPackage>
-
-                            <generatorName>java</generatorName>
-                            <library>native</library>
-
-                            <configOptions>
-                                <useJakartaEe>true</useJakartaEe>
-                                <dateLibrary>java8</dateLibrary>
-                                <openApiNullable>false</openApiNullable>
-                                <generateBuilders>false</generateBuilders>
-                                <useBeanValidation>false</useBeanValidation>
-                                <serializationLibrary>jackson</serializationLibrary>
-                                <generatedAnnotation>false</generatedAnnotation>
-                                <hideGenerationTimestamp>true</hideGenerationTimestamp>
-                            </configOptions>
-
-                            <generateModelTests>false</generateModelTests>
-                            <generateApiTests>false</generateApiTests>
-                            <generateApiDocumentation>false</generateApiDocumentation>
-                            <generateModelDocumentation>false</generateModelDocumentation>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <version>3.5.0</version>
-                <executions>
-                    <execution>
-                        <id>add-openapi-sources</id>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
-                        </goals>
-                        <configuration>
-                            <sources>
-                                <source>${project.build.directory}/generated-sources/openapi/src/main/java</source>
-                            </sources>
                         </configuration>
                     </execution>
                 </executions>

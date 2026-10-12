@@ -26,7 +26,7 @@ public final class SpsParameterValidator
      *
      * @param parameters      all nodes VRChat exposes below {@code /avatar/parameters}
      * @param rootParameter   configured {@code avatarParameter} (may contain OSC wildcards)
-     * @param tipParameter    configured {@code penetratorTipParameter} (only used for ORIFICE, may be null)
+     * @param tipParameter    tip parameter derived from {@code avatarParameter} (only used for ORIFICE, may be null)
      * @param spsType         configured SPS type
      */
     public static void logReport(Collection<OscQueryNode> parameters, String rootParameter, String tipParameter, SpsType spsType)
@@ -114,7 +114,7 @@ public final class SpsParameterValidator
         logMatchedParameter("avatarParameter", rootParameter, parameters);
         if (tipParameter != null)
         {
-            logMatchedParameter("penetratorTipParameter", tipParameter, parameters);
+            logMatchedParameter("tip parameter (derived from avatarParameter)", tipParameter, parameters);
         }
     }
 
@@ -123,8 +123,8 @@ public final class SpsParameterValidator
         List<OscQueryNode> matches = SpsParameterDetector.matchingNodes(pattern, parameters);
         if (matches.isEmpty())
         {
-            log.warn("  {} '{}' does NOT match any parameter exposed by VRChat right now! Check the value in"
-                    + " app.properties and the candidates logged above.", propertyName, pattern);
+            log.warn("  {} '{}' does NOT match any parameter exposed by VRChat right now! Check the avatar"
+                    + " parameter in the settings and the candidates logged above.", propertyName, pattern);
             return;
         }
         log.info("  {} '{}' matches {} parameter(s):", propertyName, pattern, matches.size());

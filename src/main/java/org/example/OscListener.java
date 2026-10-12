@@ -44,17 +44,29 @@ public class OscListener
      * that contain none of the registered parameters do not call the listener at all.
      * Thanks to this, parameters that VRChat sends together - for example the root and the tip proximity of the
      * same penetrator - are always handled together, in one call and regardless of their order in the packet.
+     *
+     * @return unregisters the listener when run
      */
-    public void registerPacketListener(List<String> addressPatterns, Consumer<Map<String, Float>> valuesConsumer)
+    public Runnable registerPacketListener(List<String> addressPatterns, Consumer<Map<String, Float>> valuesConsumer)
     {
         List<OscAddressPattern> patterns = addressPatterns.stream().map(OscAddressPattern::new).toList();
-        oscListener.addPacketListener(new PacketListener(patterns, valuesConsumer));
+        var listener = new PacketListener(patterns, valuesConsumer);
+        oscListener.addPacketListener(listener);
+        return () -> oscListener.removePacketListener(listener);
     }
 
-    /** Stops listening for OSC messages. */
+    /** Stops listening for OSC messages and releases the port. */
     public void close()
     {
         oscListener.stopListening();
+        try
+        {
+            oscListener.close();
+        }
+        catch (IOException e)
+        {
+            log.warn("Could not close the OSC port: {}", e.getMessage());
+        }
     }
 
     @RequiredArgsConstructor

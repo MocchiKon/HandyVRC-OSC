@@ -26,7 +26,7 @@ public final class UpdateNotifier
     {
         String downloadUrl = result.downloadUrl();
         log.warn("A newer version of HandyVRC-OSC is available: {} (this build is {}). Download it from {} "
-                        + "(set checkForUpdates=false in app.properties to stop this check)",
+                        + "(turn off 'Check for updates' in the Advanced settings to stop this check)",
                 result.latestVersion(), result.currentVersion(), downloadUrl);
         showDialogSafely(notificationMessage(result), downloadUrl);
     }
@@ -41,7 +41,7 @@ public final class UpdateNotifier
 
                 %s
 
-                You can turn this startup check off with checkForUpdates=false in app.properties."""
+                You can turn this startup check off with 'Check for updates' in the Advanced settings."""
                 .formatted(result.latestVersion(), result.currentVersion(), result.downloadUrl());
     }
 

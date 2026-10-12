@@ -1,11 +1,10 @@
 package org.example.processor;
 
-import handy.model.DeviceModeValue;
 import org.example.config.ConfigProperties;
+import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
-import org.example.handy.common.MessageDelayStats;
-import org.example.handy.common.dto.*;
+import org.example.handy.common.dto.SliderSettingsResult;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
@@ -72,7 +71,7 @@ class HdspParameterProcessorTest
     void firstPointIsSentWithSendIntervalAndWithoutStopOnTarget()
     {
         var client = new RecordingHandyClient();
-        var processor = processor(client, false);
+        var processor = processor(client);
 
         processor.actOnValueChange(0.5f); // Position 50
         processor.trySendingMessage(0);
@@ -89,7 +88,7 @@ class HdspParameterProcessorTest
     void deviceIsStoppedWhenPointsStopComing()
     {
         var client = new RecordingHandyClient();
-        var processor = processor(client, false);
+        var processor = processor(client);
         processor.actOnValueChange(0.5f);
         processor.trySendingMessage(0);
 
@@ -111,7 +110,7 @@ class HdspParameterProcessorTest
     void stopIsSentOnlyOnce()
     {
         var client = new RecordingHandyClient();
-        var processor = processor(client, false);
+        var processor = processor(client);
         processor.actOnValueChange(0.5f);
         processor.trySendingMessage(0);
         processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
@@ -131,7 +130,7 @@ class HdspParameterProcessorTest
     void pointAfterStopUsesTheSameIntervalAsTheFirstPoint()
     {
         var client = new RecordingHandyClient();
-        var processor = processor(client, false);
+        var processor = processor(client);
         processor.actOnValueChange(0.5f);
         processor.trySendingMessage(0);
         processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
@@ -147,9 +146,9 @@ class HdspParameterProcessorTest
     void aFreshMoveIsNotStoppedInstantlyEvenIfItsPointWaitedALongTime()
     {
         var client = new RecordingHandyClient();
-        var processor = processor(client, false);
+        var processor = processor(client);
         processor.actOnValueChange(0.5f);
-        // Simulate a point that waited for the device (for example while HDSP timing was enabled)
+        // Simulate a point that waited a long time before it was sent
         processor.lastPointActivityMs = System.currentTimeMillis() - HdspParameterProcessor.HDSP_IDLE_STOP_TIMEOUT_MS - 10;
 
         processor.trySendingMessage(0); // Sends the movement
@@ -158,59 +157,16 @@ class HdspParameterProcessorTest
         assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
     }
 
-    @Test
-    void timingHoldsBackTheNextCommandUntilTheCurrentMoveFinishes() throws InterruptedException
-    {
-        var client = new RecordingHandyClient();
-        client.messageDelayMs = 30;
-        var processor = processor(client, true);
-
-        processor.actOnValueChange(0.5f);
-        processor.trySendingMessage(0); // First point is always sent immediately
-        assertThat(client.hdspCalls).hasSize(1);
-
-        processor.actOnValueChange(0.2f);
-        processor.trySendingMessage(0); // The previous move (20ms) is still running
-        assertThat(client.hdspCalls).hasSize(1);
-
-        Thread.sleep(25);
-        processor.trySendingMessage(0); // Now the next command may be sent
-        assertThat(client.hdspCalls).hasSize(2);
-        assertThat(client.hdspCalls.getLast().stopOnTarget()).isFalse();
-    }
-
-    @Test
-    void timingAddsTheMeasuredJitterAsSafetyMargin() throws InterruptedException
-    {
-        var client = new RecordingHandyClient();
-        client.messageDelayMs = 30;
-        client.messageJitterMs = 40;
-        var processor = processor(client, true);
-
-        processor.actOnValueChange(0.5f);
-        processor.trySendingMessage(0); // First point (20ms move)
-
-        processor.actOnValueChange(0.2f);
-        Thread.sleep(25); // Longer than the move, but shorter than move + jitter margin
-        processor.trySendingMessage(0);
-        assertThat(client.hdspCalls).hasSize(1);
-
-        Thread.sleep(45); // Now the jitter margin has passed as well
-        processor.trySendingMessage(0);
-        assertThat(client.hdspCalls).hasSize(2);
-    }
-
     /**
      * The idle stop of the plain HDSP processor is disabled in the implementation (it made the slider bounce back,
      * which is what HDSP_SMOOTHED solves), so this expectation cannot hold any more.
      */
     @Disabled("idle stop is disabled in HdspParameterProcessor; use HDSP_SMOOTHED for stopping on a stopped input")
     @Test
-    void pointAfterStopIsSentImmediatelyEvenWithTimingEnabled()
+    void pointAfterStopIsSentImmediately()
     {
         var client = new RecordingHandyClient();
-        client.messageDelayMs = 30;
-        var processor = processor(client, true);
+        var processor = processor(client);
 
         processor.actOnValueChange(0.5f);
         processor.trySendingMessage(0);
@@ -218,7 +174,7 @@ class HdspParameterProcessorTest
         processor.trySendingMessage(0); // Stop
 
         processor.actOnValueChange(0.2f);
-        processor.trySendingMessage(0); // After a stop the timing is not trusted, so it is sent right away
+        processor.trySendingMessage(0); // After a stop the point is sent right away
 
         assertThat(client.hdspCalls).hasSize(3);
         assertThat(client.hdspCalls.get(1).stopOnTarget()).isTrue();
@@ -265,7 +221,7 @@ class HdspParameterProcessorTest
     @Test
     void positionsAreNormalizedIntoTheDeviceRange()
     {
-        var processor = processor(new RecordingHandyClient(), false);
+        var processor = processor(new RecordingHandyClient());
 
         assertThat(processor.toNormalizedPosition(0f)).isEqualTo(0f);
         assertThat(processor.toNormalizedPosition(37f)).isCloseTo(0.37f, within(0.0001f));
@@ -276,7 +232,7 @@ class HdspParameterProcessorTest
     void positionsOutsideTheStrokeAreClamped()
     {
         var client = new RecordingHandyClient();
-        var processor = processor(client, false);
+        var processor = processor(client);
 
         // Out of range OSC values must not reach the device: it would cap them silently, which turns them into
         // a move to the end of the stroke instead of the requested position
@@ -288,12 +244,11 @@ class HdspParameterProcessorTest
         assertThat(client.hdspCalls).extracting(HdspCall::xp).containsExactly(0f, 1f);
     }
 
-    private static HdspParameterProcessor processor(HandyClient handyClient, boolean hdspTiming)
+    private static HdspParameterProcessor processor(HandyClient handyClient)
     {
         var processor = new HdspParameterProcessor(handyClient, ConfigProperties.builder()
                 .spsType(SpsType.PENETRATOR)
                 .minimalValueChange(0)
-                .hdspTiming(hdspTiming)
                 .build());
         processor.setValueChangeListener(value -> {});
         return processor;
@@ -312,11 +267,9 @@ class HdspParameterProcessorTest
     private static class RecordingHandyClient extends HandyClient
     {
         final List<HdspCall> hdspCalls = new ArrayList<>();
-        long messageDelayMs;
-        long messageJitterMs;
 
         @Override
-        public HandyBaseResponseWithError changeMode(DeviceModeValue mode)
+        public HandyBaseResponseWithError changeMode(DeviceMode mode)
         {
             return new HandyBaseResponseWithError(null);
         }
@@ -325,30 +278,6 @@ class HdspParameterProcessorTest
         public boolean checkConnectionStatus()
         {
             return true;
-        }
-
-        @Override
-        public HandySetupResponse hspSetup()
-        {
-            return new HandySetupResponse(null, new HandySetupResult(0));
-        }
-
-        @Override
-        public HandyBaseResponseWithError hspFlush()
-        {
-            return new HandyBaseResponseWithError(null);
-        }
-
-        @Override
-        public HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving)
-        {
-            return new HandyBaseResponseWithError(null);
-        }
-
-        @Override
-        public HandyHspAddResponse hspAdd(HspAddRequest requestBody)
-        {
-            return new HandyHspAddResponse(null, null);
         }
 
         @Override
@@ -367,17 +296,6 @@ class HdspParameterProcessorTest
         {
             hdspCalls.add(new HdspCall(xp, t, stopOnTarget));
             return new HandyBaseResponseWithError(null);
-        }
-
-        @Override
-        public void sendRequestForMessageDelayCalc()
-        {
-        }
-
-        @Override
-        public MessageDelayStats calculateMessageDelayStats()
-        {
-            return new MessageDelayStats(messageDelayMs, messageJitterMs);
         }
     }
 }

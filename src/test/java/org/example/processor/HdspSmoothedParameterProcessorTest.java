@@ -1,12 +1,11 @@
 package org.example.processor;
 
-import handy.model.DeviceModeValue;
-import org.example.TestDataSource;
 import org.example.config.ConfigProperties;
+import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
-import org.example.handy.common.MessageDelayStats;
-import org.example.handy.common.dto.*;
+import org.example.handy.common.dto.SliderSettingsResult;
+import org.example.handy.common.dto.SliderState;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -30,6 +29,8 @@ class HdspSmoothedParameterProcessorTest
     private static final long VRCHAT_FRAME_MS = 22;
     /** Interval of the processor loop (it sleeps a quarter of the minimum send interval). */
     private static final long TICK_MS = HdspSmoothedParameterProcessor.HDSP_MIN_SEND_INTERVAL_MS / 4;
+    /** Length (in meters) of the penetrator simulated in ORIFICE mode, used to derive its tip proximity. */
+    private static final float SIMULATED_PENETRATOR_LENGTH = 0.1f;
 
     @Test
     void firstValueDoesNotStartAMove()
@@ -866,8 +867,8 @@ class HdspSmoothedParameterProcessorTest
             lastInputPosition = position;
             if (orifice)
             {
-                float rootProximity = 1.f - (1.f - position) * TestDataSource.SIMULATED_PENETRATOR_LENGTH;
-                processor.actOnProximityChange(rootProximity, rootProximity + TestDataSource.SIMULATED_PENETRATOR_LENGTH);
+                float rootProximity = 1.f - (1.f - position) * SIMULATED_PENETRATOR_LENGTH;
+                processor.actOnProximityChange(rootProximity, rootProximity + SIMULATED_PENETRATOR_LENGTH);
                 return;
             }
             processor.actOnValueChange((float) (1.0 - position));
@@ -1048,7 +1049,7 @@ class HdspSmoothedParameterProcessorTest
         }
 
         @Override
-        public HandyBaseResponseWithError changeMode(DeviceModeValue mode)
+        public HandyBaseResponseWithError changeMode(DeviceMode mode)
         {
             return new HandyBaseResponseWithError(null);
         }
@@ -1057,30 +1058,6 @@ class HdspSmoothedParameterProcessorTest
         public boolean checkConnectionStatus()
         {
             return true;
-        }
-
-        @Override
-        public HandySetupResponse hspSetup()
-        {
-            return new HandySetupResponse(null, new HandySetupResult(0));
-        }
-
-        @Override
-        public HandyBaseResponseWithError hspFlush()
-        {
-            return new HandyBaseResponseWithError(null);
-        }
-
-        @Override
-        public HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving)
-        {
-            return new HandyBaseResponseWithError(null);
-        }
-
-        @Override
-        public HandyHspAddResponse hspAdd(HspAddRequest requestBody)
-        {
-            return new HandyHspAddResponse(null, null);
         }
 
         @Override
@@ -1108,17 +1085,6 @@ class HdspSmoothedParameterProcessorTest
             double startX = harness.processor.sliderPositionForTest(harness.virtualTimeMs());
             calls.add(new RecordedCall(xp, t, harness.virtualTimeMs(), startX, stopOnTarget));
             return new HandyBaseResponseWithError(null);
-        }
-
-        @Override
-        public void sendRequestForMessageDelayCalc()
-        {
-        }
-
-        @Override
-        public MessageDelayStats calculateMessageDelayStats()
-        {
-            return new MessageDelayStats(harness.commandLatencyMs, 0);
         }
     }
 }

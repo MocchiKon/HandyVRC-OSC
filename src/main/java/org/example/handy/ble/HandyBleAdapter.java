@@ -37,6 +37,10 @@ public class HandyBleAdapter implements RpcTransport
     {
         List<Adapter> adapters = Adapter.getAdapters();
         log.info("Available Bluetooth adapters: {}", adapters.size());
+        if (adapters.isEmpty())
+        {
+            throw new IllegalStateException("No Bluetooth adapter found");
+        }
         Adapter adapter = adapters.get(0);
         try
         {
@@ -66,7 +70,7 @@ public class HandyBleAdapter implements RpcTransport
         handy = adapter.scanGetResults().stream()
                 .filter(this::isHandy)
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("Handy not found via BLE"));
+                .orElseThrow(() -> new IllegalStateException("Handy not found. Make sure it is turned on, nearby and not connected to another app."));
 
         log.info("Found Handy");
         handy.connect();

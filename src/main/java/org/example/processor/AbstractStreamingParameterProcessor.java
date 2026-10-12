@@ -5,21 +5,14 @@ import org.example.config.ConfigProperties;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.MovementPoint;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
 /**
  * Shared logic for processors that turn OSC values into a stream of timed device positions.
- * Subclasses decide how the collected points are actually delivered to the device
- * (buffered by the device in HSP, sent directly in HDSP).
+ * Subclasses decide how the collected points are actually delivered to the device.
  */
 @Slf4j
 public abstract class AbstractStreamingParameterProcessor implements ParameterProcessor
@@ -45,12 +38,11 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     protected PenetratorLengthDetector penetratorLengthDetector;
 
     /** Notified with the position (0-100) of every produced point; used to drive the UI. */
-    protected Consumer<Integer> onValueChange;
+    protected Consumer<Integer> onValueChange = value -> {};
 
-    // Recording points
-    private boolean savePointsToFile;
-    private Integer firstRecordedPointTime;
-    private final static String POINTS_FILE_NAME = "handy_points-%s.csv".formatted(UUID.randomUUID());
+    /** Cleared by {@link #stop()}, which ends the sending loop. */
+    private volatile boolean running;
+    private Thread sendingThread;
 
     protected AbstractStreamingParameterProcessor(HandyClient handyClient, ConfigProperties config)
     {
@@ -62,7 +54,6 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
         this.fullyPenetratedAtValue = resolveFullyPenetratedAtValue(config);
         // Penetrator length is only needed (and only auto-detected) for orifice
         this.penetratorLengthDetector = spsType == SpsType.ORIFICE ? new PenetratorLengthDetector() : null;
-        this.savePointsToFile = config.savePointsToFile();
     }
 
     @Override
@@ -174,15 +165,48 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     }
 
     @Override
-    public void run()
+    public synchronized void run()
     {
-        new Thread(this::runSendingLogicInInfiniteLoop).start();
+        if (sendingThread != null)
+        {
+            throw new IllegalStateException("The processor was started already");
+        }
+        running = true;
+        sendingThread = new Thread(this::runSendingLogicUntilStopped, "processor-sending-loop");
+        sendingThread.setDaemon(true);
+        sendingThread.start();
     }
 
-    private void runSendingLogicInInfiniteLoop()
+    /**
+     * Ends the sending loop and waits (briefly) for it to finish, so that no command is sent to the device after
+     * this method returned. A stopped processor cannot be started again.
+     */
+    @Override
+    public synchronized void stop()
+    {
+        running = false;
+        if (sendingThread == null)
+        {
+            return;
+        }
+        try
+        {
+            sendingThread.join(2_000);
+        }
+        catch (InterruptedException e)
+        {
+            Thread.currentThread().interrupt();
+        }
+        if (sendingThread.isAlive())
+        {
+            log.warn("The sending loop did not end in time");
+        }
+    }
+
+    private void runSendingLogicUntilStopped()
     {
         long lastMessageSentMs = 0;
-        while (true)
+        while (running)
         {
             try
             {
@@ -270,25 +294,6 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
             List<MovementPoint> pointsCopy = new ArrayList<>(points);
             points.clear();
             return pointsCopy;
-        }
-    }
-
-    protected void savePointsToFileIfRequested(List<MovementPoint> pointsToSave)
-    {
-        if (!savePointsToFile) return;
-        if (firstRecordedPointTime == null) firstRecordedPointTime = pointsToSave.getFirst().t();
-
-        byte[] data = pointsToSave.stream()
-                .map(point -> "\n%s,%s".formatted(point.t() - firstRecordedPointTime, point.x()))
-                .collect(Collectors.joining())
-                .getBytes();
-        try
-        {
-            Files.write(Path.of(POINTS_FILE_NAME), data, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        }
-        catch (IOException e)
-        {
-            log.error("Failed to save points {} to file: {}", pointsToSave, e.getMessage());
         }
     }
 }

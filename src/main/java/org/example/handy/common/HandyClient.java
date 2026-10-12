@@ -1,21 +1,14 @@
 package org.example.handy.common;
 
-import handy.model.DeviceModeValue;
-import lombok.extern.slf4j.Slf4j;
-import org.example.handy.common.dto.*;
+import org.example.handy.common.dto.SliderSettingsResult;
+import org.example.handy.common.dto.SliderState;
 
-import java.util.Arrays;
 import java.util.Optional;
 
-@Slf4j
 public abstract class HandyClient implements AutoCloseable
 {
-    public abstract HandyBaseResponseWithError changeMode(DeviceModeValue mode);
+    public abstract HandyBaseResponseWithError changeMode(DeviceMode mode);
     public abstract boolean checkConnectionStatus();
-    public abstract HandySetupResponse hspSetup();
-    public abstract HandyBaseResponseWithError hspFlush();
-    public abstract HandyBaseResponseWithError hspPlay(long startTime, long serverTime, boolean pauseOnStarving);
-    public abstract HandyHspAddResponse hspAdd(HspAddRequest requestBody);
     public abstract void setSliderSettings(Float min, Float max);
     public abstract Optional<SliderSettingsResult> getSliderSettings();
 
@@ -26,11 +19,9 @@ public abstract class HandyClient implements AutoCloseable
      * The position is the normalized HDSP position in the 0.0-1.0 range of the configured stroke zone, which is
      * the unit the device protocol uses. The HDSP processor converts the percentage positions used in the rest
      * of the app before calling this, so an implementation only has to translate the command into its own wire
-     * format: the BLE protocol takes the position as it is, while the HDSP endpoints of the Handy REST API take
-     * percent (0-100) and a client for them would have to scale it up.
+     * format (the BLE protocol takes the position as it is).
      * <p>
-     * HDSP is only available over a direct Bluetooth connection. The default implementation rejects it so that
-     * API clients cannot accidentally use it.
+     * HDSP is only available over a direct Bluetooth connection. The default implementation rejects it.
      *
      * @param xp normalized position in the 0.0-1.0 range (relative to the configured stroke zone)
      * @param t time in milliseconds the device should take to reach the position
@@ -42,6 +33,14 @@ public abstract class HandyClient implements AutoCloseable
     }
 
     /**
+     * Stops the HDSP move the slider is executing, so that it does not keep moving after the app stopped sending
+     * commands. Only the direct Bluetooth connection supports HDSP; the default implementation does nothing.
+     */
+    public void hdspStop()
+    {
+    }
+
+    /**
      * Reads the position and speed the slider has right now. Only the direct Bluetooth connection can read it; the
      * default implementation reports nothing.
      */
@@ -49,91 +48,6 @@ public abstract class HandyClient implements AutoCloseable
     {
         return Optional.empty();
     }
-
-    /**
-     * Estimates the one-way message delay (network latency) to the device/server in milliseconds.
-     * Can be used to auto-calculate the points offset applied to points sent to the device.
-     */
-    public long calculateMessageDelay()
-    {
-        return calculateMessageDelayStats().delayMs();
-    }
-
-    /**
-     * Measures the round-trip delay to the device/server a few times and derives the one-way message delay
-     * and its variation.
-     * <p>
-     * Outliers are rejected before the statistics are calculated: the lowest and highest samples are trimmed
-     * so that a single scheduling hiccup cannot skew the result.
-     */
-    public MessageDelayStats calculateMessageDelayStats()
-    {
-        try
-        {
-            log.info("Measuring message delay...");
-            final int SYNC_SAMPLES = 30;
-            long[] rtdSamples = new long[SYNC_SAMPLES];
-
-            for (int i = 0; i < SYNC_SAMPLES; i++)
-            {
-                long tSend = System.currentTimeMillis();
-                sendRequestForMessageDelayCalc();
-                long tReceive = System.currentTimeMillis();
-                rtdSamples[i] = tReceive - tSend;
-            }
-
-            log.info("RTD samples (ms): {}", Arrays.toString(rtdSamples));
-            MessageDelayStats stats = toMessageDelayStats(rtdSamples);
-            log.info("Message delay: messageDelay={}ms, jitter={}ms (from {} samples, outliers rejected)",
-                    stats.delayMs(), stats.jitterMs(), SYNC_SAMPLES);
-//            return messageDelay + (int) (messageDelay * 0.5f); // Add some extra leeway
-            return stats;
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException("Message delay measurement failed", e);
-        }
-    }
-
-    /**
-     * Converts raw round-trip-delay samples into one-way delay statistics, rejecting outliers by trimming the
-     * lowest and highest samples (10% of the samples on each side, at least one when possible).
-     *
-     * @param rtdSamples round-trip delay samples in milliseconds
-     * @return average one-way delay and one-way jitter (spread of the remaining samples)
-     */
-    static MessageDelayStats toMessageDelayStats(long[] rtdSamples)
-    {
-        if (rtdSamples == null || rtdSamples.length == 0)
-        {
-            throw new IllegalArgumentException("At least one message delay sample is required");
-        }
-        long[] sorted = rtdSamples.clone();
-        Arrays.sort(sorted);
-
-        int trimCount = sorted.length >= 3 ? Math.max(1, sorted.length / 10) : 0;
-        int from = trimCount;
-        int to = sorted.length - trimCount; // exclusive
-
-        long rtdSum = 0;
-        long minRtd = Long.MAX_VALUE;
-        long maxRtd = Long.MIN_VALUE;
-        for (int i = from; i < to; i++)
-        {
-            long rtd = sorted[i];
-            rtdSum += rtd;
-            if (rtd < minRtd) minRtd = rtd;
-            if (rtd > maxRtd) maxRtd = rtd;
-        }
-
-        int usedSamples = to - from;
-        long avgRtd = Math.round(rtdSum / (double) usedSamples);
-        long oneWayDelay = avgRtd / 2;
-        long oneWayJitter = (maxRtd - minRtd) / 2;
-        return new MessageDelayStats(oneWayDelay, oneWayJitter);
-    }
-
-    public abstract void sendRequestForMessageDelayCalc();
 
     /**
      * Releases the resources the client holds (for example the reader thread that receives BLE responses).

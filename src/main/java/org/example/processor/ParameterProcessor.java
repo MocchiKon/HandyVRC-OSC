@@ -11,6 +11,9 @@ public interface ParameterProcessor
      * the penetrator length. Only used when the configured spsType is ORIFICE.
      */
     void actOnProximityChange(Float rootProximity, Float tipProximity);
+    /** Starts sending commands to the device (in the background). */
     void run();
+    /** Stops sending commands to the device. A stopped processor cannot be started again. */
+    void stop();
     void setValueChangeListener(Consumer<Integer> onValueChange);
 }

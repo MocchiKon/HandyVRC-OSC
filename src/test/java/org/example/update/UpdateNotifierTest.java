@@ -16,7 +16,7 @@ class UpdateNotifierTest
                 .contains("0.3")
                 .contains("0.2")
                 .contains("https://example.test/releases/0.3")
-                .contains("checkForUpdates=false");
+                .contains("Check for updates");
     }
 
     @Test

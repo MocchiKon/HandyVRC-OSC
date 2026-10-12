@@ -1,8 +1,8 @@
 package org.example.processor;
 
-import handy.model.DeviceModeValue;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
+import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.SliderSettingsResult;
@@ -11,8 +11,6 @@ import org.example.handy.common.dto.SliderState;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-
-import static org.example.Main.delayedClosingWithLog;
 
 /**
  * {@link HdspParameterProcessor} with motion extrapolation (the {@code HDSP_SMOOTHED} algorithm).
@@ -54,7 +52,7 @@ import static org.example.Main.delayedClosingWithLog;
  *   further along the way the slider moves, and the long duration turns what is left of that error into a slow
  *   correction instead of a jump. When the input moves again, the slider continues from there.</li>
  *   <li>A movement against the current direction only counts as a reversal once the input moved back by
- *   {@link #REVERSAL_MIN_DISTANCE}; until then the slider is stopped, so the jitter of a slow movement cannot send it
+ *   {@code hdspReversalMinDistancePercent}; until then the slider is stopped, so the jitter of a slow movement cannot send it
  *   the other way.</li>
  *   <li>A Handy does not move slower than about 30 mm/s ({@code hdspMinSliderSpeed}), whatever time it is given for
  *   a move: told to crawl, it runs ahead of where it is believed to be, and the next stop pulls it back. An input
@@ -100,6 +98,13 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * it was believed to be, and the next stop pulled it back). An input slower than this is followed in steps.
      */
     public static final int DEFAULT_MIN_SLIDER_SPEED_MM_PER_SECOND = 30;
+    /**
+     * Default for {@code hdspReversalMinDistancePercent}: distance (in percent of the stroke) the input has to
+     * move back from the furthest position of its movement before it counts as reversed. The jitter of a tracked
+     * hand is easily larger than what a slow movement covers within the movement window, and without this every
+     * such wobble would send the slider the other way.
+     */
+    public static final float DEFAULT_REVERSAL_MIN_DISTANCE_PERCENT = 2f;
     /** Stroke length assumed when the device does not report it (the full stroke of a Handy). */
     static final double DEFAULT_STROKE_MM = 100;
     /**
@@ -194,12 +199,6 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * persists through the whole deceleration and ends as an overshoot when the input stops.
      */
     private static final int AHEAD_CORRECTION_MS = 150;
-    /**
-     * Distance (in stroke units) the input has to move back from the furthest position of its movement before it
-     * counts as reversed. The jitter of a tracked hand is easily larger than what a slow movement covers within the
-     * movement window, and without this every such wobble would send the slider the other way.
-     */
-    static final double REVERSAL_MIN_DISTANCE = 0.02;
     /**
      * Distance (in stroke units) the input has to move away from where it rested before the slider follows it
      * again. While a hand rests, its jitter flips the (quantized) value back and forth by a step, which looks like
@@ -301,10 +300,14 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     private final int speedStopThresholdPercent;
     private final int divergenceThresholdPercent;
     private final int speedMeasureWindowMs;
+    /** See {@link #DEFAULT_REVERSAL_MIN_DISTANCE_PERCENT}, in stroke units. */
+    private final double reversalMinDistance;
     /** Slowest speed (millimeters per second) the device moves with, 0 when there is no minimum. */
     private final double minSliderSpeedMmPerSecond;
     /** Slowest speed (stroke units per second) the slider is moved with, 0 when there is no minimum. */
     private double minSliderSpeed;
+    /** Thread of the device position log, null when it is not enabled. */
+    private Thread devicePositionLogThread;
 
     /** Raw input values, used for the speed measurement only. */
     private final List<InputSample> samples = new ArrayList<>();
@@ -375,23 +378,23 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
                 ? config.hdspMinSliderSpeed()
                 : DEFAULT_MIN_SLIDER_SPEED_MM_PER_SECOND;
         this.minSliderSpeed = minSliderSpeedMmPerSecond / DEFAULT_STROKE_MM;
+        // 0 is a valid value here as well: every movement back counts as a reversal
+        this.reversalMinDistance = (config.hdspReversalMinDistancePercent() != null && config.hdspReversalMinDistancePercent() >= 0
+                ? config.hdspReversalMinDistancePercent()
+                : DEFAULT_REVERSAL_MIN_DISTANCE_PERCENT) / 100.0;
+        if (handyClient == null)
+        {
+            return; // Tests only
+        }
 
-        HandyBaseResponseWithError response = handyClient.changeMode(DeviceModeValue.HDSP);
+        HandyBaseResponseWithError response = handyClient.changeMode(DeviceMode.HDSP);
         if (response.error() != null)
         {
-            delayedClosingWithLog("Could not change Handy mode to HDSP (reason: %s). Closing app...".formatted(response.error().message()));
+            throw new IllegalStateException("Could not change Handy mode to HDSP (reason: %s)".formatted(response.error().message()));
         }
-        if (config.pointsOffset() != null)
-        {
-            log.warn("'pointsOffset' is ignored in HDSP mode (HDSP is a direct protocol without device-side buffering)");
-        }
-        if (config.hdspTiming())
-        {
-            log.info("'hdspTiming' is not used by HDSP_SMOOTHED (moves are chained by extrapolating the input, not by"
-                    + " predicting the device delay)");
-        }
-        log.info("HDSP_SMOOTHED: speedChangeThreshold={}%, speedStopThreshold={}%, divergenceThreshold={}%, speedWindow={}ms",
-                speedChangeThresholdPercent, speedStopThresholdPercent, divergenceThresholdPercent, speedMeasureWindowMs);
+        log.info("HDSP_SMOOTHED: speedChangeThreshold={}%, speedStopThreshold={}%, divergenceThreshold={}%, speedWindow={}ms,"
+                        + " reversalMinDistance={}%", speedChangeThresholdPercent, speedStopThresholdPercent,
+                divergenceThresholdPercent, speedMeasureWindowMs, percent(reversalMinDistance));
         log.debug("HDSP_SMOOTHED does not apply minimalValueChange ({}): raw OSC values are needed to notice that"
                 + " the user stopped moving", config.minimalValueChange());
 
@@ -495,6 +498,17 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         }, "hdsp-device-position");
         thread.setDaemon(true);
         thread.start();
+        devicePositionLogThread = thread;
+    }
+
+    @Override
+    public synchronized void stop()
+    {
+        super.stop();
+        if (devicePositionLogThread != null)
+        {
+            devicePositionLogThread.interrupt();
+        }
     }
 
     private static int resolvePositive(Integer configured, int defaultValue)
@@ -1218,7 +1232,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         // A movement against the current direction is only a reversal once the input moved back far enough from
         // the furthest position it reached; until then it is treated as a stop, so jitter cannot reverse the slider
         boolean movedBack = lastSample != null && !Double.isNaN(turnExtreme)
-                && Math.abs(position - turnExtreme) >= REVERSAL_MIN_DISTANCE;
+                && Math.abs(position - turnExtreme) >= reversalMinDistance;
         if (slowMovement && direction != 0 && (direction > 0) == inputTowardsTop && movedBack
                 && Math.signum(windowVelocity()) == (inputTowardsTop ? -1 : 1))
         {

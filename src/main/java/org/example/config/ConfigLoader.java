@@ -1,57 +1,67 @@
 package org.example.config;
 
 import ch.qos.logback.classic.Level;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.EnumUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.example.Main;
-import org.example.processor.HdspSmoothedParameterProcessor;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.function.Function;
 
-import static org.example.Main.delayedClosingWithLog;
-
+/**
+ * Reads and writes app.properties. The settings are edited in the GUI, so the file is mostly written by the app,
+ * but it stays a plain, commented properties file that can be edited by hand.
+ * <p>
+ * Reading is lenient: a missing, invalid or out of range value (for example from a file written by an older
+ * version) falls back to its default with a warning instead of preventing the app from starting.
+ */
 @Slf4j
 public class ConfigLoader
 {
-    private static final String NEW_ROOT_SUFFIX = "NewRoot";
-    private static final String NEW_TIP_SUFFIX = "NewTip";
-
     private final Path appConfigPath;
 
-    @SneakyThrows
     public ConfigLoader(Path appConfigPath)
     {
         this.appConfigPath = appConfigPath;
     }
 
+    public Path getPath()
+    {
+        return appConfigPath;
+    }
+
+    /**
+     * @return the settings from app.properties, or the default settings (which are written to app.properties)
+     * when the file does not exist yet
+     */
     public ConfigProperties readOrInitConfig() throws IOException
     {
         if (Files.notExists(appConfigPath))
         {
-            try (InputStream defaultFile = Main.class.getResourceAsStream("/app.properties"))
-            {
-                if (defaultFile == null)
-                {
-                    delayedClosingWithLog("Missing config file!");
-                }
-                Files.write(appConfigPath, defaultFile.readAllBytes());
-            }
-            catch (Exception e)
-            {
-                delayedClosingWithLog("Failed initializing config!", e);
-            }
+            ConfigProperties defaults = ConfigProperties.defaults();
+            save(defaults);
+            log.info("Created {} with the default settings", appConfigPath);
+            setLoggingLevel(Level.toLevel(defaults.logLevel()));
+            return defaults;
         }
-        return readConfigPropertiesAndSetLoggingLevel();
+        Properties properties = new Properties();
+        try (Reader reader = Files.newBufferedReader(appConfigPath, StandardCharsets.UTF_8))
+        {
+            properties.load(reader);
+        }
+        ConfigProperties config = parse(properties);
+        setLoggingLevel(Level.toLevel(config.logLevel()));
+        log.info("Loaded config: {}", config.toLoggableString());
+        return config;
     }
 
     public static void setLoggingLevel(Level level)
@@ -60,233 +70,235 @@ public class ConfigLoader
         root.setLevel(level);
     }
 
-    private ConfigProperties readConfigPropertiesAndSetLoggingLevel() throws IOException
+    static ConfigProperties parse(Properties properties)
     {
-        Properties properties = new Properties();
-        try (var file = new FileInputStream(appConfigPath.toString()))
-        {
-            properties.load(file);
-        }
-        Level logLevel = Level.toLevel(getPropertyOrDefault(properties, "logLevel", "INFO"));
-        setLoggingLevel(logLevel);
+        ConfigProperties defaults = ConfigProperties.defaults();
 
-        String processingAlgorithmProperty = getPropertyOrDefault(properties, "processingAlgorithm", "HSP");
-        var processingAlgorithm = EnumUtils.getEnum(ParameterProcessorType.class, processingAlgorithmProperty.toUpperCase());
-        if (processingAlgorithm == null)
-        {
-            delayedClosingWithLog("No '%s' algorithm available! Check your config file, closing app...".formatted(processingAlgorithmProperty));
-        }
-        var spsType = EnumUtils.getEnum(SpsType.class, getPropertyOrCloseAppWhenBlank(properties, "spsType").toUpperCase());
-        if (spsType == null)
-        {
-            delayedClosingWithLog("No '%s' spsType available! Check your config file, closing app...".formatted(spsType));
-        }
-        var connectionModeStr = getPropertyOrDefault(properties, "connectionMode", "API").toUpperCase();
-        var connectionMode = EnumUtils.getEnum(ConnectionMode.class, connectionModeStr);
-        if (connectionMode == null)
-        {
-            log.warn("Unknown connectionMode '{}', defaulting to API", connectionModeStr);
-            connectionMode = ConnectionMode.API;
-        }
-        String algorithmConnectionError = validateConnectionMode(processingAlgorithm, connectionMode);
-        if (algorithmConnectionError != null)
-        {
-            delayedClosingWithLog(algorithmConnectionError);
-        }
-        boolean testMode = Boolean.parseBoolean(getPropertyOrDefault(properties, "testMode", "false"));
-        boolean checkForUpdates = Boolean.parseBoolean(getPropertyOrDefault(properties, "checkForUpdates", "true"));
-        boolean savePointsToFile = Boolean.parseBoolean(getPropertyOrDefault(properties, "savePointsToFile", "false"));
-        boolean clamp = Boolean.parseBoolean(getPropertyOrDefault(properties, "clamp", "false"));
-        boolean pauseOnStarving = Boolean.parseBoolean(getPropertyOrDefault(properties, "pauseOnStarving", "false"));
-        boolean hdspTiming = Boolean.parseBoolean(getPropertyOrDefault(properties, "hdspTiming", "false"));
-        Integer hdspSpeedChangeThresholdPercent = getProperty(properties, "hdspSpeedChangeThresholdPercent")
-                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_CHANGE_THRESHOLD_PERCENT);
-        Integer hdspSpeedStopThresholdPercent = getProperty(properties, "hdspSpeedStopThresholdPercent")
-                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_STOP_THRESHOLD_PERCENT);
-        Integer hdspDivergenceThresholdPercent = getProperty(properties, "hdspDivergenceThresholdPercent")
-                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_DIVERGENCE_THRESHOLD_PERCENT);
-        Integer hdspSpeedMeasureWindowMs = getProperty(properties, "hdspSpeedMeasureWindowMs")
-                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_SPEED_MEASURE_WINDOW_MS);
-        Integer hdspMinSliderSpeed = getProperty(properties, "hdspMinSliderSpeed")
-                .map(Integer::parseInt).orElse(HdspSmoothedParameterProcessor.DEFAULT_MIN_SLIDER_SPEED_MM_PER_SECOND);
-        boolean hdspLogDevicePosition = Boolean.parseBoolean(getPropertyOrDefault(properties, "hdspLogDevicePosition", "false"));
-        boolean useOscQuery = Boolean.parseBoolean(getPropertyOrDefault(properties, "useOscQuery", "true"));
+        SpsType spsType = getEnum(properties, "spsType", SpsType.class, defaults.spsType());
+        ParameterProcessorType processingAlgorithm = getProperty(properties, "processingAlgorithm")
+                .map(value -> parseProcessingAlgorithm(value, defaults.processingAlgorithm()))
+                .orElse(defaults.processingAlgorithm());
 
-        boolean isApiMode = connectionMode == ConnectionMode.API;
+        Optional<String> customAvatarParameter = getProperty(properties, "avatarParameter");
+        String avatarParameter = customAvatarParameter.orElseGet(() -> ConfigProperties.defaultAvatarParameter(spsType));
 
-        String avatarParameter = getProperty(properties, "avatarParameter").orElseGet(() -> pickDefaultAvatarParameter(spsType));
-        String penetratorTipParameter = null;
-        if (spsType == SpsType.ORIFICE)
+        Float sliderMin = getFloat(properties, "sliderMin", defaults.sliderMin(), 0f, 1f);
+        Float sliderMax = getFloat(properties, "sliderMax", defaults.sliderMax(), 0f, 1f);
+        if (sliderMin >= sliderMax)
         {
-            penetratorTipParameter = findPenetratorTipParameter(properties, avatarParameter);
-            if (penetratorTipParameter == null)
-            {
-                delayedClosingWithLog(("The tip proximity parameter needed to auto-detect the penetrator length could not be "
-                        + "derived from avatarParameter '%s' (its 'NewRoot' suffix is replaced with 'NewTip'). Either use a "
-                        + "'NewRoot' avatar parameter (for example '/avatar/parameters/OGB/Orf/*/PenOthersNewRoot') or set "
-                        + "'penetratorTipParameter' in the config. Closing app...")
-                        .formatted(avatarParameter));
-            }
-            log.info("Penetrator length will be auto-detected from root proximity '{}' and tip proximity '{}'", avatarParameter, penetratorTipParameter);
+            log.warn("'sliderMin' ({}) has to be lower than 'sliderMax' ({}), using the full stroke", sliderMin, sliderMax);
+            sliderMin = defaults.sliderMin();
+            sliderMax = defaults.sliderMax();
         }
 
-        Float fullyPenetratedAtValue = resolveFullyPenetratedAtValue(properties);
-
-        var config = ConfigProperties.builder()
-                .connectionMode(connectionMode)
-                .testMode(testMode)
-                .checkForUpdates(checkForUpdates)
-                .savePointsToFile(savePointsToFile)
-                .clamp(clamp)
-                .pauseOnStarving(pauseOnStarving)
-                .hdspTiming(hdspTiming)
-                .hdspSpeedChangeThresholdPercent(hdspSpeedChangeThresholdPercent)
-                .hdspSpeedStopThresholdPercent(hdspSpeedStopThresholdPercent)
-                .hdspDivergenceThresholdPercent(hdspDivergenceThresholdPercent)
-                .hdspSpeedMeasureWindowMs(hdspSpeedMeasureWindowMs)
-                .hdspMinSliderSpeed(hdspMinSliderSpeed)
-                .hdspLogDevicePosition(hdspLogDevicePosition)
-                .listenOnPort(Integer.parseInt(getPropertyOrDefault(properties, "listenOnPort", "9001")))
-                .useOscQuery(useOscQuery)
-                .handyApplicationId(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "handyApplicationId") : null)
+        return ConfigProperties.builder()
+                .spsType(spsType)
                 .processingAlgorithm(processingAlgorithm)
                 .avatarParameter(avatarParameter)
-                .deviceConnectionKey(isApiMode ? getPropertyOrCloseAppWhenBlank(properties, "deviceConnectionKey") : null)
-                .waitForApiResponse(Boolean.parseBoolean(getPropertyOrDefault(properties, "waitForApiResponse", "false")))
-                .pointsOffset(getProperty(properties, "pointsOffset").map(Integer::parseInt).orElse(null))
-                .sendMessageEveryMs(Integer.parseInt(getPropertyOrCloseAppWhenBlank(properties, "sendMessageEveryMs")))
-                .minimalValueChange(Integer.parseInt(getPropertyOrDefault(properties, "minimalValueChange", "2")))
-                .penetratorTipParameter(penetratorTipParameter)
-                .sliderMin(getProperty(properties, "sliderMin").map(Float::parseFloat).orElse(null))
-                .sliderMax(getProperty(properties, "sliderMax").map(Float::parseFloat).orElse(null))
-                .fullyPenetratedAtValue(fullyPenetratedAtValue)
-                .spsType(spsType)
+                .customAvatarParameter(customAvatarParameter.isPresent())
+                .sliderMin(sliderMin)
+                .sliderMax(sliderMax)
+                .fullyPenetratedAtValue(getFloat(properties, "fullyPenetratedAtValue", defaults.fullyPenetratedAtValue(), 1f, 100f))
+                .listenOnPort(getInt(properties, "listenOnPort", defaults.listenOnPort(), 1, 65535))
+                .useOscQuery(getBoolean(properties, "useOscQuery", defaults.useOscQuery()))
+                .sendMessageEveryMs(getInt(properties, "sendMessageEveryMs", defaults.sendMessageEveryMs(), 0, 10_000))
+                .checkForUpdates(getBoolean(properties, "checkForUpdates", defaults.checkForUpdates()))
+                .minimalValueChange(getInt(properties, "minimalValueChange", defaults.minimalValueChange(), 0, 100))
+                .pauseOnStarving(getBoolean(properties, "pauseOnStarving", defaults.pauseOnStarving()))
+                .hdspSpeedChangeThresholdPercent(getInt(properties, "hdspSpeedChangeThresholdPercent", defaults.hdspSpeedChangeThresholdPercent(), 1, 1000))
+                .hdspSpeedStopThresholdPercent(getInt(properties, "hdspSpeedStopThresholdPercent", defaults.hdspSpeedStopThresholdPercent(), 1, 100))
+                .hdspDivergenceThresholdPercent(getInt(properties, "hdspDivergenceThresholdPercent", defaults.hdspDivergenceThresholdPercent(), 1, 100))
+                .hdspSpeedMeasureWindowMs(getInt(properties, "hdspSpeedMeasureWindowMs", defaults.hdspSpeedMeasureWindowMs(), 1, 10_000))
+                .hdspMinSliderSpeed(getInt(properties, "hdspMinSliderSpeed", defaults.hdspMinSliderSpeed(), 0, 1000))
+                .hdspReversalMinDistancePercent(getFloat(properties, "hdspReversalMinDistancePercent", defaults.hdspReversalMinDistancePercent(), 0f, 100f))
+                .hdspLogDevicePosition(getBoolean(properties, "hdspLogDevicePosition", defaults.hdspLogDevicePosition()))
+                .logLevel(getProperty(properties, "logLevel").orElse(defaults.logLevel()))
                 .build();
-        log.info("Loaded config: {}", config.toLoggableString());
-        return config;
     }
 
     /**
-     * HDSP is a direct streaming protocol without device-side buffering, so it only works over a low latency
-     * Bluetooth connection. HSP keeps working over both API and Bluetooth.
-     *
-     * @return an error message when the selected algorithm cannot be used with the selected connection mode,
-     * or null when the combination is valid
+     * Accepts the names written to the file (HDSP, HDSP_SMOOTHED) as well as the names shown in the GUI (DIRECT,
+     * SMOOTHED). HSP is not supported any more, so a file written by an older version falls back to the default.
      */
-    static String validateConnectionMode(ParameterProcessorType processingAlgorithm, ConnectionMode connectionMode)
+    private static ParameterProcessorType parseProcessingAlgorithm(String value, ParameterProcessorType defaultValue)
     {
-        if (isHdsp(processingAlgorithm) && connectionMode != ConnectionMode.BLUETOOTH)
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        for (ParameterProcessorType type : ParameterProcessorType.values())
         {
-            return ("Processing algorithm %s is only supported with Bluetooth! Set connectionMode=BLUETOOTH "
-                    + "or use processingAlgorithm=HSP (default). Closing app...").formatted(processingAlgorithm);
+            if (type.name().equals(normalized) || type.getLabel().toUpperCase(Locale.ROOT).equals(normalized))
+            {
+                return type;
+            }
         }
-        return null;
-    }
-
-    /** Both HDSP variants are direct streaming protocols and therefore share the same connection requirements. */
-    static boolean isHdsp(ParameterProcessorType processingAlgorithm)
-    {
-        return processingAlgorithm == ParameterProcessorType.HDSP
-                || processingAlgorithm == ParameterProcessorType.HDSP_SMOOTHED;
+        log.warn("Processing algorithm '{}' is not supported, using {} instead", value, defaultValue.getLabel());
+        return defaultValue;
     }
 
     /**
-     * Reads 'fullyPenetratedAtValue', which is a percentage of the received penetration value. A blank property
-     * disables the mapping, a value that cannot be used as a percentage (0 or less) is ignored with a warning.
+     * Writes the settings to app.properties. The file is replaced in one step, so a crash while saving cannot
+     * leave a half written file behind.
      */
-    private Float resolveFullyPenetratedAtValue(Properties properties)
+    public void save(ConfigProperties config) throws IOException
     {
-        Float value = getProperty(properties, "fullyPenetratedAtValue").map(Float::parseFloat).orElse(null);
-        String error = validateFullyPenetratedAtValue(value);
-        if (error != null)
+        Path parent = appConfigPath.toAbsolutePath().getParent();
+        Path tempFile = Files.createTempFile(parent, "app", ".properties.tmp");
+        try
         {
-            delayedClosingWithLog(error);
+            Files.writeString(tempFile, format(config), StandardCharsets.UTF_8);
+            try
+            {
+                Files.move(tempFile, appConfigPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            }
+            catch (IOException e)
+            {
+                Files.move(tempFile, appConfigPath, StandardCopyOption.REPLACE_EXISTING);
+            }
         }
-        if (value == null)
+        finally
         {
-            return null;
+            Files.deleteIfExists(tempFile);
         }
-        if (value <= 0)
-        {
-            log.warn("'fullyPenetratedAtValue' has to be greater than 0 because it is a percentage, ignoring it"
-                    + " (penetration values will be used as they are)");
-            return null;
-        }
-        log.info("Penetration values will be mapped so that {}% counts as fully penetrated", value);
-        return value;
     }
 
-    /**
-     * @return an error message when the configured value cannot be used, or null when it is valid
-     */
-    static String validateFullyPenetratedAtValue(Float fullyPenetratedAtValue)
+    static String format(ConfigProperties config)
     {
-        if (fullyPenetratedAtValue != null && fullyPenetratedAtValue > 100)
-        {
-            return ("Invalid 'fullyPenetratedAtValue' (%s)! It is a percentage of the received penetration value, so"
-                    + " it has to be between 0 and 100. Closing app...").formatted(fullyPenetratedAtValue);
-        }
-        return null;
+        var out = new StringBuilder();
+        out.append("""
+                # HandyVRC-OSC settings. They are edited in the app window, which rewrites this file whenever a setting
+                # changes. You can still edit it by hand while the app is closed.
+
+                """);
+        section(out, "Basic");
+        entry(out, "spsType", config.spsType(),
+                "PENETRATOR or ORIFICE: which SPS component of your avatar moves the device.");
+        entry(out, "processingAlgorithm", config.processingAlgorithm(),
+                "HDSP_SMOOTHED (shown as 'Smoothed', default) or HDSP (shown as 'Direct').");
+        entry(out, "avatarParameter", config.customAvatarParameter() ? config.avatarParameter() : "",
+                "Custom avatar parameter. Blank uses the default for the spsType:",
+                "PENETRATOR - " + ConfigProperties.DEFAULT_PENETRATOR_PARAMETER,
+                "ORIFICE    - " + ConfigProperties.DEFAULT_ORIFICE_PARAMETER + " (has to end with 'NewRoot')");
+        entry(out, "sliderMin", config.sliderMin(), "Bottom of the stroke the device uses (0.0 - 1.0).");
+        entry(out, "sliderMax", config.sliderMax(), "Top of the stroke the device uses (0.0 - 1.0).");
+        entry(out, "fullyPenetratedAtValue", config.fullyPenetratedAtValue(),
+                "Penetration (in %) that counts as fully penetrated, so that the full stroke is used.");
+        entry(out, "listenOnPort", config.listenOnPort(),
+                "OSC port. Only used when useOscQuery=false or when OSCQuery could not be started.");
+        entry(out, "useOscQuery", config.useOscQuery(),
+                "Lets VRChat know where to send OSC messages, so that other OSC apps cannot block the port.");
+        section(out, "Advanced");
+        entry(out, "sendMessageEveryMs", config.sendMessageEveryMs(), "Minimum time (ms) between two commands sent to the device.");
+        entry(out, "checkForUpdates", config.checkForUpdates(), "Checks GitHub for a newer version on startup.");
+        entry(out, "minimalValueChange", config.minimalValueChange(), "(Direct only) Smallest position change (in %) that is sent to the device.");
+        entry(out, "pauseOnStarving", config.pauseOnStarving(), "(Direct only) Stops the device at every position instead of moving on.");
+        entry(out, "hdspSpeedChangeThresholdPercent", config.hdspSpeedChangeThresholdPercent(), "(Smoothed only) Speed change (in %) that corrects the movement.");
+        entry(out, "hdspSpeedStopThresholdPercent", config.hdspSpeedStopThresholdPercent(), "(Smoothed only) Speed (in % of the peak speed) that counts as a stop.");
+        entry(out, "hdspDivergenceThresholdPercent", config.hdspDivergenceThresholdPercent(), "(Smoothed only) Distance (in % of the stroke) the device may fall behind.");
+        entry(out, "hdspSpeedMeasureWindowMs", config.hdspSpeedMeasureWindowMs(), "(Smoothed only) Time span (ms) the speed is measured over.");
+        entry(out, "hdspMinSliderSpeed", config.hdspMinSliderSpeed(), "(Smoothed only) Slowest speed (mm/s) the device moves with, 0 disables it.");
+        entry(out, "hdspReversalMinDistancePercent", config.hdspReversalMinDistancePercent(), "(Smoothed only) Distance (in % of the stroke) a movement has to go back to count as a reversal.");
+        entry(out, "hdspLogDevicePosition", config.hdspLogDevicePosition(), "(Smoothed only) Logs the device position (diagnostics).");
+        section(out, "Diagnostics");
+        entry(out, "logLevel", config.logLevel(), "TRACE, DEBUG, INFO, WARN or ERROR.");
+        return out.toString();
     }
 
-    /**
-     * Resolves the OSC parameter that carries the tip proximity used to auto-detect the penetrator length.
-     * Uses 'penetratorTipParameter' when provided, otherwise derives it from the configured root parameter
-     * by replacing its 'NewRoot' suffix with 'NewTip' (for example
-     * '/avatar/parameters/OGB/Orf/&lt;socket&gt;/PenOthersNewRoot' becomes
-     * '/avatar/parameters/OGB/Orf/&lt;socket&gt;/PenOthersNewTip').
-     *
-     * @return resolved tip parameter or null when it cannot be determined
-     */
-    private String findPenetratorTipParameter(Properties properties, String avatarParameter)
+    private static void section(StringBuilder out, String name)
     {
-        Optional<String> configured = getProperty(properties, "penetratorTipParameter");
-        if (configured.isPresent())
-        {
-            return configured.get();
-        }
-        if (avatarParameter != null && avatarParameter.endsWith(NEW_ROOT_SUFFIX))
-        {
-            return avatarParameter.substring(0, avatarParameter.length() - NEW_ROOT_SUFFIX.length()) + NEW_TIP_SUFFIX;
-        }
-        return null;
+        out.append("########## ").append(name).append(" ##########\n\n");
     }
 
-    private String pickDefaultAvatarParameter(SpsType spsType)
+    private static void entry(StringBuilder out, String key, Object value, String... comments)
     {
-        if (spsType == null)
+        for (String comment : comments)
         {
-            log.error("Missing spsType, cannot pick default avatar parameter");
+            out.append("# ").append(comment).append('\n');
         }
-        return switch (spsType)
-        {
-            case ORIFICE -> "/avatar/parameters/OGB/Orf/*/PenOthersNewRoot";
-            case PENETRATOR -> "/avatar/parameters/OGB/Pen/*/PenOthers";
-        };
+        out.append(key).append('=').append(value == null ? "" : escape(String.valueOf(value))).append("\n\n");
     }
 
-    private Optional<String> getProperty(Properties properties, String propertyName)
+    /** Escapes the characters that have a meaning in a properties file value. */
+    private static String escape(String value)
     {
-        return Optional.ofNullable(getPropertyOrDefault(properties, propertyName, null));
+        var escaped = new StringBuilder();
+        for (char c : value.toCharArray())
+        {
+            switch (c)
+            {
+                case '\\' -> escaped.append("\\\\");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> escaped.append(c);
+            }
+        }
+        if (!escaped.isEmpty() && escaped.charAt(0) == ' ')
+        {
+            escaped.insert(0, '\\');
+        }
+        return escaped.toString();
     }
 
-    private String getPropertyOrDefault(Properties properties, String propertyName, String defaultValue)
+    private static <E extends Enum<E>> E getEnum(Properties properties, String name, Class<E> type, E defaultValue)
     {
-        String value = properties.getProperty(propertyName, defaultValue);
-        if (StringUtils.isBlank(value))
+        return parse(properties, name, defaultValue, value -> Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT)));
+    }
+
+    private static boolean getBoolean(Properties properties, String name, boolean defaultValue)
+    {
+        return parse(properties, name, defaultValue, value ->
         {
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            if (!normalized.equals("true") && !normalized.equals("false"))
+            {
+                throw new IllegalArgumentException("not true/false");
+            }
+            return Boolean.parseBoolean(normalized);
+        });
+    }
+
+    private static int getInt(Properties properties, String name, int defaultValue, int min, int max)
+    {
+        int value = parse(properties, name, defaultValue, v -> Integer.parseInt(v.trim()));
+        if (value < min || value > max)
+        {
+            log.warn("'{}' ({}) has to be between {} and {}, using {} instead", name, value, min, max, defaultValue);
             return defaultValue;
         }
         return value;
     }
 
-    private String getPropertyOrCloseAppWhenBlank(Properties properties, String propertyName)
+    private static Float getFloat(Properties properties, String name, Float defaultValue, float min, float max)
     {
-        String value = properties.getProperty(propertyName);
-        if (StringUtils.isBlank(value))
+        float value = parse(properties, name, defaultValue, v -> Float.parseFloat(v.trim()));
+        if (Float.isNaN(value) || value < min || value > max)
         {
-            delayedClosingWithLog("Missing '%s' property in config file! Closing app...".formatted(propertyName));
+            log.warn("'{}' ({}) has to be between {} and {}, using {} instead", name, value, min, max, defaultValue);
+            return defaultValue;
         }
         return value;
+    }
+
+    private static <T> T parse(Properties properties, String name, T defaultValue, Function<String, T> parser)
+    {
+        Optional<String> value = getProperty(properties, name);
+        if (value.isEmpty())
+        {
+            return defaultValue;
+        }
+        try
+        {
+            return parser.apply(value.get());
+        }
+        catch (RuntimeException e)
+        {
+            log.warn("Invalid value '{}' of '{}', using {} instead", value.get(), name, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    private static Optional<String> getProperty(Properties properties, String name)
+    {
+        String value = properties.getProperty(name);
+        return StringUtils.isBlank(value) ? Optional.empty() : Optional.of(value.trim());
     }
 }
