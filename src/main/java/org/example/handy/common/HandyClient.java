@@ -9,6 +9,16 @@ public abstract class HandyClient implements AutoCloseable
 {
     public abstract HandyBaseResponseWithError changeMode(DeviceMode mode);
     public abstract boolean checkConnectionStatus();
+
+    /**
+     * @return a stable identifier of the connected device (a Bluetooth address or a device name), used to pick the
+     * calibration profile that belongs to it; empty when the connection cannot provide one
+     */
+    public String getDeviceIdentifier()
+    {
+        return "";
+    }
+
     public abstract void setSliderSettings(Float min, Float max);
     public abstract Optional<SliderSettingsResult> getSliderSettings();
 

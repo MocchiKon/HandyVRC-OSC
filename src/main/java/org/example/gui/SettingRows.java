@@ -33,11 +33,14 @@ final class SettingRows
         return section;
     }
 
-    static void addRow(JComponent section, JComponent row)
+    /** @return the spacer above the row, so that a caller can hide the row and its spacing together */
+    static JComponent addRow(JComponent section, JComponent row)
     {
-        section.add(Box.createVerticalStrut(ROW_GAP - 4));
+        JComponent spacer = (JComponent) Box.createVerticalStrut(ROW_GAP - 4);
+        section.add(spacer);
         row.setAlignmentX(Component.LEFT_ALIGNMENT);
         section.add(row);
+        return spacer;
     }
 
     /** Setting name followed by the info icon. */

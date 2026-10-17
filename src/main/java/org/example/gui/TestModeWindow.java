@@ -29,7 +29,7 @@ class TestModeWindow
     private final SegmentedControl<SpsType> movedPart;
     private final JLabel depthValue = new JLabel();
     private final ToggleSwitch autoStroke = new ToggleSwitch(false);
-    private final ModernSlider strokeSpeed = new ModernSlider(10, 150, 5, 40);
+    private final ModernSlider strokeSpeed = new ModernSlider(1, 150, 1, 40);
     private final WrappingText statusText = new WrappingText("", Theme.regular(12.5f), Theme.TEXT_SECONDARY);
     private final ModernButton stopButton = new ModernButton("Stop test", ModernButton.Style.SECONDARY);
     private final Timer sampler;
@@ -143,7 +143,8 @@ class TestModeWindow
                         + " steady movement. Moving the part by hand turns it off.",
                 autoStroke));
         addRow(card, sliderRow("Stroke speed",
-                "How many strokes (in and out) per minute the automatic strokes make.",
+                "How many strokes (in and out) per minute the automatic strokes make. 1 / min is about 5 mm/s peak"
+                        + " on a 100 mm stroke, below a Handy 1's minimum; Smoothed mode follows it in pulses.",
                 strokeSpeed, value -> value + " / min"));
 
         var scroll = new JScrollPane(card, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
@@ -157,7 +158,7 @@ class TestModeWindow
         var bottom = new JPanel(new BorderLayout(12, 0));
         bottom.setOpaque(false);
         bottom.add(statusText, BorderLayout.CENTER);
-        var buttonHolder = new JPanel(new GridBagLayout());
+        var buttonHolder = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         buttonHolder.setOpaque(false);
         buttonHolder.add(stopButton);
         bottom.add(buttonHolder, BorderLayout.EAST);
@@ -196,8 +197,9 @@ class TestModeWindow
             close();
             return;
         }
-        statusText.setText(status.state() == AppController.State.RUNNING
-                ? "Running: your Handy follows the depth." : status.message());
+        String message = status.message();
+        statusText.setText(status.state() == AppController.State.RUNNING && (message == null || message.isBlank())
+                ? "Running: your Handy follows the depth." : message);
         statusText.setForeground(status.state() == AppController.State.ERROR ? Theme.ERROR : Theme.TEXT_SECONDARY);
         boolean failed = status.state() == AppController.State.ERROR;
         stopButton.setText(failed ? "Retry" : "Stop test");

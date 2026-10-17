@@ -5,6 +5,7 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.Line2D;
 
 /** Small "i" in a circle next to a setting name, showing that hovering explains the setting. */
 public class InfoIcon extends JComponent
@@ -55,10 +56,13 @@ public class InfoIcon extends JComponent
         g.setColor(color);
         g.setStroke(new BasicStroke(1.3f));
         g.draw(new Ellipse2D.Float(x + 0.5f, y + 0.5f, SIZE - 1, SIZE - 1));
+        // The dot and the stem share one exact center line. Rounding only the stem to whole pixels put it half a
+        // pixel to the right of the dot at this small size.
+        float centerX = x + SIZE / 2f;
         float dot = SIZE * 0.15f;
-        g.fill(new Ellipse2D.Float(x + (SIZE - dot) / 2f, y + SIZE * 0.22f, dot, dot));
+        g.fill(new Ellipse2D.Float(centerX - dot / 2f, y + SIZE * 0.22f, dot, dot));
         g.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g.drawLine(Math.round(x + SIZE / 2f), Math.round(y + SIZE * 0.48f), Math.round(x + SIZE / 2f), Math.round(y + SIZE * 0.72f));
+        g.draw(new Line2D.Float(centerX, y + SIZE * 0.48f, centerX, y + SIZE * 0.72f));
         g.dispose();
     }
 }

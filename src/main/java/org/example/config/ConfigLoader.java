@@ -3,6 +3,7 @@ package org.example.config;
 import ch.qos.logback.classic.Level;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.example.processor.HdspSmoothedParameterProcessor;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 
@@ -116,8 +117,15 @@ public class ConfigLoader
                 .hdspDivergenceThresholdPercent(getInt(properties, "hdspDivergenceThresholdPercent", defaults.hdspDivergenceThresholdPercent(), 1, 100))
                 .hdspSpeedMeasureWindowMs(getInt(properties, "hdspSpeedMeasureWindowMs", defaults.hdspSpeedMeasureWindowMs(), 1, 10_000))
                 .hdspMinSliderSpeed(getInt(properties, "hdspMinSliderSpeed", defaults.hdspMinSliderSpeed(), 0, 1000))
+                .hdspMaxSliderSpeed(getInt(properties, "hdspMaxSliderSpeed", defaults.hdspMaxSliderSpeed(), 0, 2000))
+                .hdspUseDeviceProfile(getBoolean(properties, "hdspUseDeviceProfile", defaults.hdspUseDeviceProfile()))
                 .hdspReversalMinDistancePercent(getFloat(properties, "hdspReversalMinDistancePercent", defaults.hdspReversalMinDistancePercent(), 0f, 100f))
                 .hdspLogDevicePosition(getBoolean(properties, "hdspLogDevicePosition", defaults.hdspLogDevicePosition()))
+                .hdspDevicePositionLogIntervalMs(getInt(properties, "hdspDevicePositionLogIntervalMs",
+                        defaults.hdspDevicePositionLogIntervalMs(),
+                        HdspSmoothedParameterProcessor.MIN_DEVICE_POSITION_LOG_INTERVAL_MS,
+                        HdspSmoothedParameterProcessor.MAX_DEVICE_POSITION_LOG_INTERVAL_MS))
+                .hdspDiagnosticTrace(getBoolean(properties, "hdspDiagnosticTrace", defaults.hdspDiagnosticTrace()))
                 .logLevel(getProperty(properties, "logLevel").orElse(defaults.logLevel()))
                 .build();
     }
@@ -203,15 +211,26 @@ public class ConfigLoader
         entry(out, "sendMessageEveryMs", config.sendMessageEveryMs(), "Minimum time (ms) between two commands sent to the device.");
         entry(out, "checkForUpdates", config.checkForUpdates(), "Checks GitHub for a newer version on startup.");
         entry(out, "minimalValueChange", config.minimalValueChange(), "(Direct only) Smallest position change (in %) that is sent to the device.");
-        entry(out, "pauseOnStarving", config.pauseOnStarving(), "(Direct only) Stops the device at every position instead of moving on.");
+        entry(out, "pauseOnStarving", config.pauseOnStarving(), "(Direct only, on by default) Stops the device at every position instead of moving on.");
         entry(out, "hdspSpeedChangeThresholdPercent", config.hdspSpeedChangeThresholdPercent(), "(Smoothed only) Speed change (in %) that corrects the movement.");
         entry(out, "hdspSpeedStopThresholdPercent", config.hdspSpeedStopThresholdPercent(), "(Smoothed only) Speed (in % of the peak speed) that counts as a stop.");
         entry(out, "hdspDivergenceThresholdPercent", config.hdspDivergenceThresholdPercent(), "(Smoothed only) Distance (in % of the stroke) the device may fall behind.");
         entry(out, "hdspSpeedMeasureWindowMs", config.hdspSpeedMeasureWindowMs(), "(Smoothed only) Time span (ms) the speed is measured over.");
         entry(out, "hdspMinSliderSpeed", config.hdspMinSliderSpeed(), "(Smoothed only) Slowest speed (mm/s) the device moves with, 0 disables it.");
+        entry(out, "hdspMaxSliderSpeed", config.hdspMaxSliderSpeed(), "(Smoothed only) Highest speed (mm/s) the device can move, 0 leaves it unlimited.");
+        entry(out, "hdspUseDeviceProfile", config.hdspUseDeviceProfile(),
+                "(Smoothed only) Uses the minimum speed, maximum speed and motion start measured by the newest"
+                        + " calibration in logs/diagnostics/ instead of the two settings above. Calibrate the device"
+                        + " once per device and after a large mechanical change.");
         entry(out, "hdspReversalMinDistancePercent", config.hdspReversalMinDistancePercent(), "(Smoothed only) Distance (in % of the stroke) a movement has to go back to count as a reversal.");
         entry(out, "hdspLogDevicePosition", config.hdspLogDevicePosition(), "(Smoothed only) Logs the device position (diagnostics).");
+        entry(out, "hdspDevicePositionLogIntervalMs", config.hdspDevicePositionLogIntervalMs(),
+                "(Smoothed only) How often (ms) the device position is read while logging. The actual period is this"
+                        + " plus the ~100 ms round trip; use 50 for a short diagnostic run, not permanently.");
         section(out, "Diagnostics");
+        entry(out, "hdspDiagnosticTrace", config.hdspDiagnosticTrace(),
+                "(Smoothed only) Writes a structured JSONL trace of values, commands, device samples and BLE"
+                        + " notifications to logs/diagnostics/.");
         entry(out, "logLevel", config.logLevel(), "TRACE, DEBUG, INFO, WARN or ERROR.");
         return out.toString();
     }

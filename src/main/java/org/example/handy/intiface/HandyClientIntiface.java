@@ -120,6 +120,12 @@ public class HandyClientIntiface extends HandyClient
     }
 
     @Override
+    public String getDeviceIdentifier()
+    {
+        return device.name() == null ? "" : device.name();
+    }
+
+    @Override
     public HandyBaseResponseWithError changeMode(DeviceMode mode)
     {
         // Buttplug has no modes, every LinearCmd is a move to a position

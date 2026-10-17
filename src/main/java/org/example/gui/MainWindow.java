@@ -63,7 +63,8 @@ public class MainWindow
                 newStatus -> SwingUtilities.invokeLater(() -> showStatus(newStatus)),
                 gauge::setValue);
         this.status = controller.getStatus();
-        this.settings = new SettingsPanel(config, this::onSettingsChanged);
+        this.settings = new SettingsPanel(config, this::onSettingsChanged,
+                () -> controller.runStepResponseCalibration(effectiveConfig()));
         this.saveTimer = new Timer(SAVE_DELAY_MS, e -> saveSettings());
         saveTimer.setRepeats(false);
     }
@@ -465,6 +466,10 @@ public class MainWindow
                 && newStatus.state() != AppController.State.STOPPING);
         gauge.setActive(newStatus.state() == AppController.State.RUNNING);
         showMessage(newStatus.message(), newStatus.state() == AppController.State.ERROR);
+        if (newStatus.message() != null && newStatus.message().startsWith("Calibration saved to"))
+        {
+            settings.refreshDeviceProfile();
+        }
 
         switch (newStatus.state())
         {

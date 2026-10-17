@@ -47,6 +47,7 @@ but they are **not tested**.
 * Use the **full stroke range** if you can. A very short range makes slow movements hard for the Handy.
 * Perform movements towards the base, positioning during act is very important due to how SPS works.
 * If **Smoothed** mode does not work well for you then try **Direct**.
+* You can turn your Handy into thrusting machine, in this case you will want to  enable "Reverse movement" and use SPS type Orifice.
 
 ## Something doesn't work?
 

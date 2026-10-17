@@ -2,15 +2,17 @@ package org.example.processor;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
+import org.example.diagnostics.DeviceProfile;
+import org.example.diagnostics.DiagnosticTrace;
 import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.SliderSettingsResult;
 import org.example.handy.common.dto.SliderState;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.*;
 
 /**
  * {@link HdspParameterProcessor} with motion extrapolation (the {@code HDSP_SMOOTHED} algorithm).
@@ -37,6 +39,10 @@ import java.util.Optional;
  *   values that are too small to become a point still show that the user is moving - and, more importantly, when
  *   the user stopped moving. That is what allows the slider to be stopped quickly instead of waiting for the
  *   point stream to starve.</li>
+ *   <li>The newest values are followed as well while they move faster than the fit of the speed window (a
+ *   movement that just started, or a reversal). Without that, a fast stroke is followed only after the window has
+ *   filled, and the slider starts every stroke late (which at 150 strokes per minute costs a large part of the
+ *   stroke). A movement that slows down is still left to the steadier fit.</li>
  *   <li>VRChat only sends a value once it changed, so a slow movement arrives as a few values per second at
  *   irregular intervals. Every measurement uses at least a few values (a window that holds a single value would
  *   look like a stop), the speed is the least squares fit of those values (two values that arrived close together
@@ -54,13 +60,19 @@ import java.util.Optional;
  *   <li>A movement against the current direction only counts as a reversal once the input moved back by
  *   {@code hdspReversalMinDistancePercent}; until then the slider is stopped, so the jitter of a slow movement cannot send it
  *   the other way.</li>
- *   <li>A Handy does not move slower than about 30 mm/s ({@code hdspMinSliderSpeed}), whatever time it is given for
- *   a move: told to crawl, it runs ahead of where it is believed to be, and the next stop pulls it back. An input
+ *   <li>A Handy 1 does not move slower than about 30 mm/s ({@code hdspMinSliderSpeed}), whatever time it is given
+ *   for a move: told to crawl, it runs ahead of where it is believed to be, and the next stop pulls it back. An input
  *   slower than that is therefore followed in steps: the slider waits until the input is a step ahead and then moves
- *   to it at the minimum speed, stopping there by itself (stopOnTarget).</li>
+ *   to it at the minimum speed, stopping there by itself (stopOnTarget). A Handy 2 Pro with overclocking can have a
+ *   lower minimum, which is why the value is configurable (0 disables the pulses).</li>
+ *   <li>The fastest speed the device can move with ({@code hdspMaxSliderSpeed}, 0 for no limit) bounds every planned
+ *   move as well: the app then does not plan a speed the device cannot execute, so the position it believes the
+ *   slider is at stays realistic. This matters for a Handy 1 (about 350-420 mm/s) as much as for a faster device.</li>
  *   <li>Stops and reversals are sent as soon as they are noticed; {@code sendMessageEveryMs} only spaces out the
  *   speed corrections. The slider position is read from the device at startup, and a slider that is far from the
- *   input (further than {@code hdspDivergenceThresholdPercent}) is brought to it at a moderate speed.</li>
+ *   input (further than {@code hdspDivergenceThresholdPercent}) is brought to it - at a moderate speed while the
+ *   input rests, at the speed of the input while it moves (a fixed moderate speed can never catch up with a fast
+ *   movement and leaves the slider behind for the whole stroke).</li>
  * </ul>
  * Because a command is always issued for the position the slider has reached by then, a corrected speed is picked
  * up by the device without a jump, and because the next command is queued while the current one is still running,
@@ -75,7 +87,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * Default for {@code hdspSpeedChangeThresholdPercent}: how much the measured input speed has to differ from
      * the speed the slider is moving with before the move is corrected.
      */
-    public static final int DEFAULT_SPEED_CHANGE_THRESHOLD_PERCENT = 25;
+    public static final int DEFAULT_SPEED_CHANGE_THRESHOLD_PERCENT = 15;
     /**
      * Default for {@code hdspSpeedStopThresholdPercent}: input speed below this percentage of the fastest speed
      * of the current movement counts as "the user stopped", which stops the slider where it is.
@@ -89,9 +101,11 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     public static final int DEFAULT_DIVERGENCE_THRESHOLD_PERCENT = 20;
     /**
      * Default for {@code hdspSpeedMeasureWindowMs}: time span of the raw values used to measure the input speed.
-     * A longer window is a steadier (but slower to react) speed.
+     * A longer window is a steadier (but slower to react) speed. 100 ms still holds several values of a 45 values
+     * per second stream (the rate VRChat sends), and leaves a fast stroke enough of its short half period to be
+     * measured instead of averaged away.
      */
-    public static final int DEFAULT_SPEED_MEASURE_WINDOW_MS = 150;
+    public static final int DEFAULT_SPEED_MEASURE_WINDOW_MS = 100;
     /**
      * Default for {@code hdspMinSliderSpeed}: the slowest speed (millimeters per second) the device moves with.
      * Measured on a Handy: asked for anything slower, it moved at about 30 mm/s anyway (so it ran ahead of where
@@ -162,8 +176,13 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * the position the input stopped at.
      */
     static final double MIN_INPUT_SPEED_PERCENT_PER_SECOND = 4;
-    /** Cap for a measured input speed: a full stroke in less than a quarter of a second is not a real movement. */
-    static final double MAX_INPUT_SPEED = 4.0;
+    /**
+     * Sanity cap for a measured input speed: a full stroke in less than a twentieth of a second is a teleport, not
+     * a movement. It is deliberately far above what a Handy can execute (a Handy 1 reaches about 420 mm/s), so that
+     * faster devices are not limited by the app; the device's own maximum is configured with
+     * {@code hdspMaxSliderSpeed} and limits the plans instead.
+     */
+    static final double MAX_INPUT_SPEED = 20.0;
     /**
      * Time span in which the received values have to show movement for the input to count as moving. A movement of
      * the avatar parameter is quantized, so a user who stopped moving produces values that stay within one
@@ -175,7 +194,9 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     static final double MIN_INPUT_MOVEMENT_PERCENT = 0.3;
     /**
      * Shortest move that is planned. Only a move that is about to reach an endpoint (or the position to hold) is
-     * shorter, which is what makes those moves decelerate instead of overshooting.
+     * shorter, which is what makes those moves decelerate instead of overshooting. A full-stroke move therefore
+     * cannot be planned faster than 833%/s; a device that can move faster than that (for example an overclocked
+     * Handy 2 Pro) is limited by this floor, not by {@link #MAX_INPUT_SPEED}.
      */
     static final int MIN_MOVE_DURATION_MS = 120;
     /**
@@ -184,6 +205,8 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * distance faster than the input does, which runs the slider ahead of the user (and back once they stop).
      */
     public static final int HDSP_MAX_MOVE_DURATION_MS = 30_000;
+    /** Input speed (stroke units per second) above which the command delay is compensated (see motionStartMs). */
+    private static final double LATENCY_COMPENSATION_MIN_SPEED = 0.5;
     /** Catch up speed as a multiple of the input speed, so a slider that fell behind never sprints. */
     private static final double MAX_CATCH_UP_FACTOR = 1.5;
     /** Slowest speed (as a multiple of the input speed) a slider that is ahead of the input is slowed down to. */
@@ -243,13 +266,17 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     /**
      * Speed (stroke units per second) a slider that is far from the input (further than
      * {@code hdspDivergenceThresholdPercent}, for example because the device started somewhere else) is brought to
-     * it with. Moderate, as this is a move the user did not make.
+     * it with while the input does not move. Moderate, as this is a move the user did not make; while the input
+     * moves, a resync has to keep up with it (see {@link #resyncPlan}).
      */
     static final double RESYNC_SPEED = 0.5;
     /** Input movement (stroke units) after which a slider that is being brought to the input is re-targeted. */
     private static final double RESYNC_RETARGET_DISTANCE = 0.02;
-    /** How often the device position is requested when {@code hdspLogDevicePosition} is enabled. */
-    private static final int DEVICE_POSITION_LOG_INTERVAL_MS = 200;
+    /** Default for {@code hdspDevicePositionLogIntervalMs}: how often the device position is requested. */
+    public static final int DEFAULT_DEVICE_POSITION_LOG_INTERVAL_MS = 200;
+    /** Bounds of {@code hdspDevicePositionLogIntervalMs}; each request is a Bluetooth round trip. */
+    public static final int MIN_DEVICE_POSITION_LOG_INTERVAL_MS = 20;
+    public static final int MAX_DEVICE_POSITION_LOG_INTERVAL_MS = 2_000;
     /**
      * Input speed (stroke units per second) from which a stop is detected from the newest value alone. One input
      * interval of such a movement is clearly larger than the jitter of a tracked hand, so a value that (nearly)
@@ -257,8 +284,13 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * to notice but cannot overshoot much at those speeds.
      */
     static final double FAST_STOP_MIN_SPEED = 0.4;
-    /** The newest value counts as a stop when it moved less than this fraction of what the measured speed predicts. */
+    /** The newest value counts as a stop when it moved less than this fraction of what the value before it moved. */
     private static final double FAST_STOP_SPEED_RATIO = 0.25;
+    /**
+     * Speed (stroke units per second) the newest pair has to stay below for a stop: a movement that only slowed
+     * down while it approaches its endpoint still moves, and holding the slider there would cut the stroke short.
+     */
+    private static final double FAST_STOP_MAX_SPEED = 0.5;
     /**
      * Input intervals without a new value after which a fast movement counts as stopped. The value of a fast
      * movement changes every frame, so VRChat sends one every frame and a missing one is a stop, while a slow
@@ -304,10 +336,28 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     private final double reversalMinDistance;
     /** Slowest speed (millimeters per second) the device moves with, 0 when there is no minimum. */
     private final double minSliderSpeedMmPerSecond;
+    /** Fastest speed (millimeters per second) the device can move, 0 when there is no maximum. */
+    private final double maxSliderSpeedMmPerSecond;
+    /** The calibration profile the limits and the motion start came from, null when none is used. */
+    private final DeviceProfile deviceProfile;
+    /** Input speed below which the input counts as stopped (percent per second, see stopSpeedThreshold). */
+    private final double minInputSpeedPercentPerSecond;
     /** Slowest speed (stroke units per second) the slider is moved with, 0 when there is no minimum. */
     private double minSliderSpeed;
+    /** Fastest speed (stroke units per second) the slider is moved with, 0 when there is no maximum. */
+    private double maxSliderSpeed;
+    /**
+     * Time between sending a command and the slider actually starting to move, measured by the device calibration.
+     * The planner leads the input by this much so that the movement arrives at the user's position in time instead
+     * of trailing it. 0 disables the compensation.
+     */
+    private double motionStartMs;
     /** Thread of the device position log, null when it is not enabled. */
     private Thread devicePositionLogThread;
+    /** How often the device position is read while the log is enabled (each read is a BLE round trip). */
+    private final int devicePositionLogIntervalMs;
+    /** Structured JSONL trace of this session, null when {@code hdspDiagnosticTrace} is disabled. */
+    private volatile DiagnosticTrace trace;
 
     /** Raw input values, used for the speed measurement only. */
     private final List<InputSample> samples = new ArrayList<>();
@@ -342,7 +392,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     /** Position the slider is held at (only meaningful while {@link #holding} is true). */
     private double holdTarget = 0.5;
     /** App time at which the last command was sent (0 while nothing was sent yet). */
-    private long lastCommandSentMs;
+    private volatile long lastCommandSentMs;
     /** App time at which the input speed dropped below the stop threshold (0 while the input is moving). */
     private long belowStopSpeedSinceMs;
     /** Fastest input speed of the current movement, used as the reference for the stop threshold. */
@@ -362,9 +412,22 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         this(null, config);
     }
 
+    // Tests only
+    void setMotionStartMsForTest(double motionStartMs)
+    {
+        this.motionStartMs = motionStartMs;
+    }
+
     public HdspSmoothedParameterProcessor(HandyClient handyClient, ConfigProperties config)
     {
+        this(handyClient, config, loadDeviceProfile(handyClient, config));
+    }
+
+    /** Package-private variant that takes the profile explicitly, used by the tests. */
+    HdspSmoothedParameterProcessor(HandyClient handyClient, ConfigProperties config, DeviceProfile deviceProfile)
+    {
         super(handyClient, config);
+        this.deviceProfile = deviceProfile;
         this.speedChangeThresholdPercent = resolvePositive(config.hdspSpeedChangeThresholdPercent(),
                 DEFAULT_SPEED_CHANGE_THRESHOLD_PERCENT);
         this.speedStopThresholdPercent = resolvePositive(config.hdspSpeedStopThresholdPercent(),
@@ -373,15 +436,36 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
                 DEFAULT_DIVERGENCE_THRESHOLD_PERCENT);
         this.speedMeasureWindowMs = Math.max(resolvePositive(config.hdspSpeedMeasureWindowMs(),
                 DEFAULT_SPEED_MEASURE_WINDOW_MS), MIN_SPEED_MEASURE_WINDOW_MS);
+        // The calibration measures the device itself; without a profile the two settings are used.
+        double profileMinMm = deviceProfile == null ? -1 : deviceProfile.plannedMinMmPerSecond();
+        double profileMaxMm = deviceProfile == null ? -1 : deviceProfile.plannedMaxMmPerSecond();
         // 0 is a valid value here: it disables the minimum
-        this.minSliderSpeedMmPerSecond = config.hdspMinSliderSpeed() != null && config.hdspMinSliderSpeed() >= 0
+        double configuredMinMm = config.hdspMinSliderSpeed() != null && config.hdspMinSliderSpeed() >= 0
                 ? config.hdspMinSliderSpeed()
                 : DEFAULT_MIN_SLIDER_SPEED_MM_PER_SECOND;
+        this.minSliderSpeedMmPerSecond = profileMinMm >= 0 ? profileMinMm : configuredMinMm;
         this.minSliderSpeed = minSliderSpeedMmPerSecond / DEFAULT_STROKE_MM;
+        // 0 is a valid value here as well: no maximum limit
+        double configuredMaxMm = config.hdspMaxSliderSpeed() != null && config.hdspMaxSliderSpeed() >= 0
+                ? config.hdspMaxSliderSpeed()
+                : 0;
+        this.maxSliderSpeedMmPerSecond = profileMaxMm > 0 ? profileMaxMm : configuredMaxMm;
+        this.maxSliderSpeed = maxSliderSpeedMmPerSecond > 0
+                ? maxSliderSpeedMmPerSecond / DEFAULT_STROKE_MM : 0;
+        this.motionStartMs = deviceProfile == null ? 0 : Math.clamp(deviceProfile.motionStartMs(), 0, 500);
+        // A device that can move at 1 mm/s is also worth following at 1 mm/s. The default 4%/s only exists to reject
+        // the jitter of a tracked hand; a calibrated slow device lowers it, but never below half a percent per second.
+        this.minInputSpeedPercentPerSecond = deviceProfile == null ? MIN_INPUT_SPEED_PERCENT_PER_SECOND
+                : Math.min(MIN_INPUT_SPEED_PERCENT_PER_SECOND, Math.max(0.5, minSliderSpeedMmPerSecond / 2.0));
         // 0 is a valid value here as well: every movement back counts as a reversal
         this.reversalMinDistance = (config.hdspReversalMinDistancePercent() != null && config.hdspReversalMinDistancePercent() >= 0
                 ? config.hdspReversalMinDistancePercent()
                 : DEFAULT_REVERSAL_MIN_DISTANCE_PERCENT) / 100.0;
+        this.devicePositionLogIntervalMs = Math.clamp(
+                config.hdspDevicePositionLogIntervalMs() != null
+                        ? config.hdspDevicePositionLogIntervalMs()
+                        : DEFAULT_DEVICE_POSITION_LOG_INTERVAL_MS,
+                MIN_DEVICE_POSITION_LOG_INTERVAL_MS, MAX_DEVICE_POSITION_LOG_INTERVAL_MS);
         if (handyClient == null)
         {
             return; // Tests only
@@ -392,6 +476,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         {
             throw new IllegalStateException("Could not change Handy mode to HDSP (reason: %s)".formatted(response.error().message()));
         }
+        startDiagnosticTrace(config);
         log.info("HDSP_SMOOTHED: speedChangeThreshold={}%, speedStopThreshold={}%, divergenceThreshold={}%, speedWindow={}ms,"
                         + " reversalMinDistance={}%", speedChangeThresholdPercent, speedStopThresholdPercent,
                 divergenceThresholdPercent, speedMeasureWindowMs, percent(reversalMinDistance));
@@ -407,8 +492,30 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         // The minimum speed is a property of the device (mm/s), the moves are planned in units of the stroke zone
         Float strokeMm = sliderSettings.map(SliderSettingsResult::strokeMm).orElse(null);
         this.minSliderSpeed = minSliderSpeedMmPerSecond / (strokeMm != null ? strokeMm : DEFAULT_STROKE_MM);
+        this.maxSliderSpeed = maxSliderSpeedMmPerSecond > 0
+                ? maxSliderSpeedMmPerSecond / (strokeMm != null ? strokeMm : DEFAULT_STROKE_MM) : 0;
+        if (deviceProfile != null)
+        {
+            log.info("HDSP_SMOOTHED: using the measured device profile from {} (device {}): motion starts after"
+                            + " {}ms, max {} mm/s, minimum {} mm/s", deviceProfile.calibratedAt(),
+                    deviceProfile.deviceId() == null || deviceProfile.deviceId().isBlank()
+                            ? "unknown" : deviceProfile.deviceId(),
+                    "%.0f".formatted(deviceProfile.motionStartMs()),
+                    "%.0f".formatted(maxSliderSpeedMmPerSecond),
+                    "%.0f".formatted(minSliderSpeedMmPerSecond));
+        }
         log.info("HDSP_SMOOTHED: minSliderSpeed={} mm/s ({}%/s of the {} stroke)", minSliderSpeedMmPerSecond,
                 percentPerSecond(minSliderSpeed), strokeMm != null ? "%.0f mm".formatted(strokeMm) : "assumed 100 mm");
+        if (maxSliderSpeedMmPerSecond > 0)
+        {
+            log.info("HDSP_SMOOTHED: maxSliderSpeed={} mm/s ({}%/s of the {} stroke)", maxSliderSpeedMmPerSecond,
+                    percentPerSecond(maxSliderSpeed),
+                    strokeMm != null ? "%.0f mm".formatted(strokeMm) : "assumed 100 mm");
+        }
+        else
+        {
+            log.info("HDSP_SMOOTHED: maxSliderSpeed=no limit");
+        }
         readInitialSliderPosition(sliderSettings.orElse(null));
         if (config.hdspLogDevicePosition())
         {
@@ -446,18 +553,107 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     }
 
     /**
+     * Starts the structured trace when {@code hdspDiagnosticTrace} is enabled. The trace is written next to the
+     * normal log files, so a session can be analyzed without parsing the text log.
+     */
+    private void startDiagnosticTrace(ConfigProperties config)
+    {
+        if (!config.hdspDiagnosticTrace())
+        {
+            return;
+        }
+        Map<String, Object> session = new LinkedHashMap<>();
+        session.put("algorithm", "HDSP_SMOOTHED");
+        session.put("connection", String.valueOf(config.connection()));
+        session.put("spsType", String.valueOf(config.spsType()));
+        session.put("sliderMin", config.sliderMin());
+        session.put("sliderMax", config.sliderMax());
+        session.put("fullyPenetratedAtValue", config.fullyPenetratedAtValue());
+        session.put("reverseMovement", config.reverseMovement());
+        session.put("minimalValueChange", config.minimalValueChange());
+        session.put("speedChangeThresholdPercent", speedChangeThresholdPercent);
+        session.put("speedStopThresholdPercent", speedStopThresholdPercent);
+        session.put("divergenceThresholdPercent", divergenceThresholdPercent);
+        session.put("speedMeasureWindowMs", speedMeasureWindowMs);
+        session.put("minSliderSpeedMmPerSecond", minSliderSpeedMmPerSecond);
+        session.put("maxSliderSpeedMmPerSecond", maxSliderSpeedMmPerSecond);
+        session.put("useDeviceProfile", deviceProfile != null);
+        session.put("deviceProfileCalibratedAt", deviceProfile == null ? null : deviceProfile.calibratedAt());
+        session.put("deviceProfileMotionStartMs", deviceProfile == null ? null : deviceProfile.motionStartMs());
+        session.put("minInputSpeedPercentPerSecond", minInputSpeedPercentPerSecond);
+        session.put("reversalMinDistancePercent", reversalMinDistance * 100.0);
+        session.put("devicePositionLogIntervalMs", devicePositionLogIntervalMs);
+        try
+        {
+            DiagnosticTrace started = DiagnosticTrace.start(Path.of("logs", "diagnostics"), session);
+            trace = started;
+            log.info("HDSP_SMOOTHED: writing a JSONL diagnostic trace to {}", started.path().toAbsolutePath());
+        }
+        catch (IOException e)
+        {
+            log.warn("Could not start the diagnostic trace: {}", e.getMessage());
+        }
+    }
+
+    /** Writes a structured trace event, when tracing is enabled. */
+    private void traceEvent(String type, Object... fields)
+    {
+        DiagnosticTrace current = trace;
+        if (current != null)
+        {
+            current.event(type, fields);
+        }
+    }
+
+    /** @return the newest input value, read under the lock that {@link #addSample} writes it with */
+    private InputSample lastSampleSnapshot()
+    {
+        synchronized (samples)
+        {
+            return lastSample;
+        }
+    }
+
+    private double inputPositionSnapshot()
+    {
+        InputSample sample = lastSampleSnapshot();
+        return sample == null ? 0.5 : sample.x();
+    }
+
+    /** @return the position the slider is believed to be at, also before the first command */
+    private double believedPosition(SliderMove move, long atMs)
+    {
+        if (move != null)
+        {
+            return move.positionAt(atMs);
+        }
+        return Double.isNaN(initialSliderPosition) ? inputPositionSnapshot() : initialSliderPosition;
+    }
+
+    private static String describeMove(SliderMove move, long nowMs)
+    {
+        if (move == null)
+        {
+            return "none";
+        }
+        return "%s sent %dms ago %s%%->%s%% t=%dms".formatted(move.kind(), nowMs - move.sentMs(),
+                percent(move.startX()), percent(move.target()), move.durationMs());
+    }
+
+    /**
      * Logs the position the device reports next to the position the slider is believed to be at, which shows
      * whether the device executes the moves the way they are planned (for example whether it can move as slowly
      * as it is asked to). Diagnostics only: every request is a round trip over BLE.
      * <p>
      * The request reaches the device about one command delay after it is sent, and so does every command: the
      * reported position is therefore compared with the position the slider was believed to have when the
-     * request was sent, which cancels the delay out.
+     * request was sent (and when the response arrived), and the active move, the newest input value and the time
+     * since the last command are logged as well, so that a sample can be aligned with the command stream.
      */
     private void startDevicePositionLog()
     {
-        log.info("HDSP_SMOOTHED: logging the device position every {}ms (hdspLogDevicePosition=true)",
-                DEVICE_POSITION_LOG_INTERVAL_MS);
+        log.info("HDSP_SMOOTHED: logging the device position every {}ms (hdspLogDevicePosition=true; every read is a"
+                + " BLE round trip)", devicePositionLogIntervalMs);
         Thread thread = new Thread(() ->
         {
             boolean failing = false;
@@ -466,15 +662,67 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
                 try
                 {
                     long requestedAtMs = nowMs();
-                    SliderMove believedMove = move;
+                    long requestedAtMonoMs = System.nanoTime() / 1_000_000L;
+                    SliderMove moveAtRequest = move;
+                    InputSample inputAtRequest = lastSampleSnapshot();
+                    long lastCommandAtRequest = lastCommandSentMs;
+
                     Optional<SliderState> state = handyClient.getSliderState();
-                    long roundTripMs = nowMs() - requestedAtMs;
-                    if (state.isPresent() && believedMove != null)
+
+                    long respondedAtMs = nowMs();
+                    long respondedAtMonoMs = System.nanoTime() / 1_000_000L;
+                    long roundTripMs = respondedAtMs - requestedAtMs;
+                    SliderMove moveAtResponse = move;
+                    InputSample inputAtResponse = lastSampleSnapshot();
+                    long lastCommandAtResponse = lastCommandSentMs;
+                    if (state.isPresent())
                     {
-                        log.debug("[HDSP-SMOOTHED] Device at {}% ({} mm, {} mm/s), believed at {}% (round trip {}ms)",
-                                percent(state.get().position()), "%.1f".formatted(state.get().positionMm()),
-                                "%.0f".formatted(state.get().speedMmPerSecond()),
-                                percent(believedMove.positionAt(requestedAtMs)), roundTripMs);
+                        SliderState slider = state.get();
+                        double believedAtRequest = believedPosition(moveAtRequest, requestedAtMs);
+                        double believedAtResponse = believedPosition(moveAtResponse, respondedAtMs);
+                        double input = inputAtResponse == null ? 0.5 : inputAtResponse.x();
+                        long inputAgeMs = inputAtResponse == null ? -1 : respondedAtMs - inputAtResponse.t();
+                        long lastCommandAgeMs = lastCommandAtResponse == 0 ? -1 : respondedAtMs - lastCommandAtResponse;
+                        String inputAge = inputAgeMs < 0 ? "no value yet" : inputAgeMs + "ms old";
+                        String lastCommandAge = lastCommandAgeMs < 0 ? "none" : lastCommandAgeMs + "ms ago";
+                        log.debug("[HDSP-SMOOTHED] Device at {}% ({} mm, {} mm/s), believed at request {}% /"
+                                        + " response {}%, round trip {}ms; move {}; input {}% ({}); last command {}",
+                                percent(slider.position()), "%.1f".formatted(slider.positionMm()),
+                                "%.0f".formatted(slider.speedMmPerSecond()),
+                                percent(believedAtRequest), percent(believedAtResponse), roundTripMs,
+                                describeMove(moveAtResponse, respondedAtMs), percent(input), inputAge, lastCommandAge);
+                        double inputAtRequestPosition = inputAtRequest == null ? 0.5 : inputAtRequest.x();
+                        long inputAgeAtRequestMs = inputAtRequest == null ? -1 : requestedAtMs - inputAtRequest.t();
+                        long lastCommandAgeAtRequestMs = lastCommandAtRequest == 0 ? -1 : requestedAtMs - lastCommandAtRequest;
+                        traceEvent("device",
+                                "position", slider.position(),
+                                "positionMm", slider.positionMm(),
+                                "reportedSpeedMmS", slider.speedMmPerSecond(),
+                                "requestWallMs", requestedAtMs,
+                                "responseWallMs", respondedAtMs,
+                                "requestMonoMs", requestedAtMonoMs,
+                                "responseMonoMs", respondedAtMonoMs,
+                                "rttMs", roundTripMs,
+                                "believedAtRequest", believedAtRequest,
+                                "believedAtResponse", believedAtResponse,
+                                "inputAtRequest", inputAtRequestPosition,
+                                "inputAgeAtRequestMs", inputAgeAtRequestMs,
+                                "lastCommandAgeAtRequestMs", lastCommandAgeAtRequestMs,
+                                "moveAtRequestKind", moveAtRequest == null ? null : moveAtRequest.kind().name(),
+                                "moveAtRequestSentWallMs", moveAtRequest == null ? null : moveAtRequest.sentMs(),
+                                "moveAtRequestAgeMs", moveAtRequest == null ? null : requestedAtMs - moveAtRequest.sentMs(),
+                                "moveAtRequestStart", moveAtRequest == null ? null : moveAtRequest.startX(),
+                                "moveAtRequestTarget", moveAtRequest == null ? null : moveAtRequest.target(),
+                                "moveAtRequestDurationMs", moveAtRequest == null ? null : moveAtRequest.durationMs(),
+                                "moveAtResponseKind", moveAtResponse == null ? null : moveAtResponse.kind().name(),
+                                "moveAtResponseSentWallMs", moveAtResponse == null ? null : moveAtResponse.sentMs(),
+                                "moveAgeMs", moveAtResponse == null ? null : respondedAtMs - moveAtResponse.sentMs(),
+                                "moveStart", moveAtResponse == null ? null : moveAtResponse.startX(),
+                                "moveTarget", moveAtResponse == null ? null : moveAtResponse.target(),
+                                "moveDurationMs", moveAtResponse == null ? null : moveAtResponse.durationMs(),
+                                "input", input,
+                                "inputAgeMs", inputAgeMs,
+                                "lastCommandAgeMs", lastCommandAgeMs);
                     }
                     failing = false;
                 }
@@ -488,7 +736,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
                 }
                 try
                 {
-                    Thread.sleep(DEVICE_POSITION_LOG_INTERVAL_MS);
+                    Thread.sleep(devicePositionLogIntervalMs);
                 }
                 catch (InterruptedException e)
                 {
@@ -509,6 +757,26 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         {
             devicePositionLogThread.interrupt();
         }
+        DiagnosticTrace current = trace;
+        trace = null;
+        if (current != null)
+        {
+            current.event("session-end", "stoppedAtWallMs", nowMs());
+            current.close();
+        }
+    }
+
+    /**
+     * Loads the newest calibration profile that belongs to this device. Nothing is loaded when the user turned the
+     * profile off, so the two manual settings are used exactly as entered.
+     */
+    private static DeviceProfile loadDeviceProfile(HandyClient client, ConfigProperties config)
+    {
+        if (client == null || !config.hdspUseDeviceProfile())
+        {
+            return null;
+        }
+        return DeviceProfile.loadLatest(client.getDeviceIdentifier()).orElse(null);
     }
 
     private static int resolvePositive(Integer configured, int defaultValue)
@@ -580,6 +848,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         }
         // Every raw value, so that a session can be replayed from its log
         log.trace("[HDSP-SMOOTHED] Value {}%", percent(position));
+        traceEvent("value", "position", position, "raw", floatPosition);
         receivedSamples++;
         lastPointActivityMs = now;
     }
@@ -613,6 +882,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         {
             return lastMoveSentMs; // The slider is already where it should be
         }
+        desired = limitSpeed(desired);
         boolean urgent = move == null || desired.kind() == MoveKind.HOLD || desired.towardsTop() != move.towardsTop();
         if (!urgent && sinceLastCommandMs < getSendIntervalMs())
         {
@@ -696,7 +966,13 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         // a slider that is behind moves faster, and one that is ahead moves slower so that the input catches up.
         // The speed is bounded both ways, so a correction never turns into a sprint or into a stop.
         double extrapolatedInput = extrapolatedInputPosition(now, speed);
-        double lag = sliderDistance - (inputTowardsTop ? 1 - extrapolatedInput : extrapolatedInput);
+        // A command starts the device only after the connection and the firmware delays. Leading the input by
+        // that time makes the movement arrive when the user gets there instead of trailing the whole stroke.
+        double predictedInput = motionStartMs > 0 && !slowMovement && speed >= LATENCY_COMPENSATION_MIN_SPEED
+                ? Math.clamp(extrapolatedInput + (inputTowardsTop ? 1 : -1) * speed * (motionStartMs / 1000.0),
+                0.0, 1.0)
+                : extrapolatedInput;
+        double lag = sliderDistance - (inputTowardsTop ? 1 - predictedInput : predictedInput);
         // A slider that is ahead of a fast movement follows the newest values: the fit of the speed window still
         // holds the faster values of a deceleration, and a slider that keeps that speed runs past the user when
         // they stop. (The values of a fast movement arrive every frame, a slow one's newest pair is mostly noise.)
@@ -735,7 +1011,9 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
      * {@code hdspDivergenceThresholdPercent} while the input rests or while the slider is past it (the device
      * started somewhere else, so it may wait at the endpoint the input moves towards for the whole stroke), or
      * it is on its way to the input already. A slider that is far behind a moving input catches up with the
-     * movement instead.
+     * movement instead. Whether the input moves is judged from the raw values as well: the measured speed needs a
+     * few values, and a movement that just started must not be mistaken for a rest (which would resync the slider
+     * to the input at a moderate speed while the user moves away from it).
      */
     private boolean needsResync(long now, double sliderPosition, boolean inputMoving)
     {
@@ -749,7 +1027,11 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
             return Math.abs(gap) > MIN_MOVE_DISTANCE;
         }
         boolean sliderPastInput = inputTowardsTop ? gap < 0 : gap > 0;
-        return Math.abs(gap) * 100 > divergenceThresholdPercent && (!inputMoving || sliderPastInput);
+        // The raw values are what decides whether the input moves: the measured speed needs a few values before
+        // it is available, and a movement that just started must not be mistaken for a stop (which would bring
+        // the slider to the input at the moderate resync speed while the user moves away from it)
+        boolean inputMoves = inputMoving || inputMoved();
+        return Math.abs(gap) * 100 > divergenceThresholdPercent && (!inputMoves || sliderPastInput);
     }
 
     /**
@@ -770,8 +1052,12 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
             log.debug("[HDSP-SMOOTHED] Slider at {}% is far from the input at {}%, bringing it there",
                     percent(sliderPosition), percent(inputPosition));
         }
+        // A resync while the input moves has to keep up with it, otherwise the slider falls behind further
+        // (a fixed moderate speed can never catch up with a fast movement)
+        double resyncSpeed = Math.max(RESYNC_SPEED,
+                Math.max(minSliderSpeed, Math.abs(inputVelocity())));
         return new MovePlan(MoveKind.RESYNC, inputPosition > sliderPosition, inputPosition,
-                Math.abs(inputPosition - sliderPosition), Math.max(RESYNC_SPEED, minSliderSpeed), 0);
+                Math.abs(inputPosition - sliderPosition), resyncSpeed, 0);
     }
 
     /**
@@ -847,6 +1133,12 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     /** @return true when the newest values show more movement than the quantization of the input */
     private boolean inputMoved()
     {
+        // A slow movement covers too little in the normal movement window to be told from jitter; the long window
+        // that measures its speed is used instead. Without this a device that can move at 1 mm/s would never start.
+        if (slowMovement)
+        {
+            return inputMoved(SLOW_SPEED_MEASURE_WINDOW_MS, MIN_INPUT_MOVEMENT_PERCENT / 200.0);
+        }
         return inputMoved(INPUT_MOVEMENT_WINDOW_MS, MIN_INPUT_MOVEMENT_PERCENT / 100.0);
     }
 
@@ -1048,6 +1340,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         {
             plan = holdPlan(inputPosition, -lead, approachSpeed);
         }
+        plan = limitSpeed(plan);
         holdTarget = plan.target();
         restPosition = inputPosition();
         log.debug("[HDSP-SMOOTHED] Input {} (speed={}%/s), stopping slider at {}% (input at {}%)",
@@ -1166,12 +1459,27 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     }
 
     /**
+     * @return the plan with its speed limited to the measured maximum, or the plan itself when there is no maximum
+     * (or the plan is already slower). The target and the distance stay the same; a slower move simply takes longer,
+     * which keeps the position the slider is believed to be at realistic.
+     */
+    private MovePlan limitSpeed(MovePlan plan)
+    {
+        if (maxSliderSpeed <= 0 || plan.speedPerSecond() <= maxSliderSpeed)
+        {
+            return plan;
+        }
+        return new MovePlan(plan.kind(), plan.towardsTop(), plan.target(), plan.distance(), maxSliderSpeed, plan.lag());
+    }
+
+    /**
      * Sends a move and records it. The command is handed to the client without waiting for the move underway to
      * finish: the device replaces the running move, and because the command is issued for the position the slider
      * has reached by then, the slider keeps moving (at the corrected speed when there is one).
      */
     private void sendMove(long now, MovePlan plan)
     {
+        plan = limitSpeed(plan);
         double position = sliderPosition(now);
         double durationMs = Math.round(plan.durationMs());
         sendHdspMove(plan.target(), (int) durationMs, plan.kind() != MoveKind.ENDPOINT);
@@ -1186,6 +1494,17 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         log.debug("[HDSP-SMOOTHED] Move to {}% in {}ms ({}%/s, slider at {}%, input {}%, {} values/s)",
                 percent(plan.target()), (long) durationMs, percentPerSecond(plan.speedPerSecond()), percent(position),
                 percent(inputPosition()), lastMeasuredInputRatePerSecond);
+        traceEvent("move",
+                "kind", plan.kind().name(),
+                "towardsTop", plan.towardsTop(),
+                "target", plan.target(),
+                "durationMs", durationMs,
+                "stopOnTarget", plan.kind() != MoveKind.ENDPOINT,
+                "speedPerSecond", plan.speedPerSecond(),
+                "slider", position,
+                "input", inputPosition(),
+                "lag", plan.lag(),
+                "inputRatePerSecond", lastMeasuredInputRatePerSecond);
     }
 
     private void sendHdspMove(double target, int durationMs, boolean stopOnTarget)
@@ -1283,31 +1602,39 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     /**
      * Notices an abrupt stop from the newest value instead of waiting until the measurement windows show it: the
      * slider keeps moving at the speed of the input until the stop is noticed, so every input interval of delay
-     * is distance the slider runs past the user. The newest value pair is compared with the measured speed, and
-     * the time since the newest value counts as well, so a stop after which VRChat sends nothing (it only sends
-     * values that changed) is noticed as soon as the next value is overdue.
+     * is distance the slider runs past the user. The newest value pair is compared with the pair before it (a
+     * stop collapses from one value to the next, while a deceleration at an endpoint changes gradually), and the
+     * time since the newest value counts as well, so a stop after which VRChat sends nothing (it only sends values
+     * that changed) is noticed as soon as the next value is overdue.
      */
     private void updateFastStop(long now, double speed)
     {
         InputSample newest;
         InputSample previous;
+        InputSample beforePrevious;
         synchronized (samples)
         {
-            if (samples.size() < 2)
+            if (samples.size() < 3)
             {
                 fastStopped = false;
                 return;
             }
             newest = samples.getLast();
             previous = samples.get(samples.size() - 2);
+            beforePrevious = samples.get(samples.size() - 3);
         }
         double pairSpanMs = Math.max(newest.t() - previous.t(), now - newest.t());
-        if (pairSpanMs <= 0)
+        double previousSpanMs = previous.t() - beforePrevious.t();
+        if (pairSpanMs <= 0 || previousSpanMs <= 0)
         {
             return;
         }
         double pairMovement = inputTowardsTop ? newest.x() - previous.x() : previous.x() - newest.x();
+        double previousMovement = inputTowardsTop
+                ? previous.x() - beforePrevious.x()
+                : beforePrevious.x() - previous.x();
         double pairSpeed = pairMovement / (pairSpanMs / 1000.0);
+        double previousSpeed = previousMovement / (previousSpanMs / 1000.0);
         if (fastStopped)
         {
             // The stop lasts until a value moves again (in either direction, a reversal is handled from there)
@@ -1318,11 +1645,16 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         {
             return;
         }
-        if (pairSpeed < speed * FAST_STOP_SPEED_RATIO)
+        // The newest value is compared with the value before it, not with the average of the speed window: a
+        // movement that slows down near the end of its way (or before a reversal) changes gradually, while a stop
+        // collapses from one value to the next. Comparing with the much faster average of the window would turn
+        // every deceleration at an endpoint into a stop, which stops the slider short of the endpoint.
+        if (pairMovement >= 0 && pairSpeed < FAST_STOP_MAX_SPEED
+                && pairSpeed < previousSpeed * FAST_STOP_SPEED_RATIO)
         {
             fastStopped = true;
-            log.debug("[HDSP-SMOOTHED] Input stopped abruptly (newest value moved at {}%/s, measured {}%/s)",
-                    percentPerSecond(pairSpeed), percentPerSecond(speed));
+            log.debug("[HDSP-SMOOTHED] Input stopped abruptly (newest value moved at {}%/s, value before at {}%/s)",
+                    percentPerSecond(pairSpeed), percentPerSecond(previousSpeed));
         }
         else if (now - newest.t() > typicalIntervalMs() * FAST_STOP_OVERDUE_INTERVALS)
         {
@@ -1426,7 +1758,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     private double stopSpeedThreshold()
     {
         double relativeThreshold = peakSpeed * (speedStopThresholdPercent / 100.0);
-        return Math.max(relativeThreshold, MIN_INPUT_SPEED_PERCENT_PER_SECOND / 100.0);
+        return Math.max(relativeThreshold, minInputSpeedPercentPerSecond / 100.0);
     }
 
     /** @return position the slider is expected to be at right now */
@@ -1456,18 +1788,32 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
 
     /**
      * @return signed input speed in stroke units per second (positive = towards the top of the stroke), measured
-     * as the movement of the raw values over the speed window. 0 when there is not enough input to measure it,
-     * which also keeps the first value of a movement from starting a move.
+     * as the movement of the raw values over the speed window (or of the two newest values while they move faster).
      */
     private double inputVelocity()
     {
         double velocity = windowVelocity();
         double slow = slowVelocity();
         // A movement that is fast within the normal window is followed with it (the long window would lag behind
-        // the start of every stroke), everything else is measured over the long window
-        slowMovement = Math.abs(velocity) < SLOW_MOVEMENT_SPEED && !Double.isNaN(slow);
+        // the start of every stroke). The long window is only used when it also shows a slow movement: at a
+        // reversal of a fast movement the short window crosses zero while the long one still holds the movement
+        // before it (and at 2.5 strokes per second it even holds a whole stroke).
+        slowMovement = Math.abs(velocity) < SLOW_MOVEMENT_SPEED && !Double.isNaN(slow)
+                && Math.abs(slow) < SLOW_MOVEMENT_SPEED;
         if (!slowMovement)
         {
+            // A fast movement that just started (or reversed) is still averaged down by the values before it:
+            // the newest values already move, so their speed is what the slider can start with. Only when they
+            // move faster (an acceleration) and in the same direction as the fit; slowing down is left to the
+            // (steadier) fit so that the slider does not run past an input that decelerates.
+            double newestPair = newestPairVelocity(nowMs());
+            boolean fitMissing = Math.abs(velocity) < MIN_INPUT_SPEED_PERCENT_PER_SECOND / 100.0;
+            if (!Double.isNaN(newestPair)
+                    && (fitMissing || (Math.signum(newestPair) == Math.signum(velocity)
+                    && Math.abs(newestPair) > Math.abs(velocity))))
+            {
+                return newestPair;
+            }
             return velocity;
         }
         // The fit decides the direction, but it lags behind a deceleration (it still holds the faster values of the
@@ -1478,6 +1824,46 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
             return 0;
         }
         return Math.signum(slow) * Math.min(Math.abs(slow), Math.abs(velocity));
+    }
+
+    /**
+     * @return signed speed of the two newest values (NaN when they do not move the same way as the pair before
+     * them, or when no value arrived recently). The fit of the speed window needs a few values to show a movement
+     * that just started (or a reversal), while the newest values already move: following them as well removes the
+     * dead time at the start of a fast stroke.
+     */
+    private double newestPairVelocity(long now)
+    {
+        InputSample newest;
+        InputSample previous;
+        InputSample beforePrevious;
+        synchronized (samples)
+        {
+            if (samples.size() < 3)
+            {
+                return Double.NaN;
+            }
+            newest = samples.getLast();
+            previous = samples.get(samples.size() - 2);
+            beforePrevious = samples.get(samples.size() - 3);
+        }
+        if (inputPaused(now))
+        {
+            return Double.NaN;
+        }
+        long spanMs = Math.max(newest.t() - previous.t(), now - newest.t());
+        long previousSpanMs = previous.t() - beforePrevious.t();
+        if (spanMs <= 0 || previousSpanMs <= 0)
+        {
+            return Double.NaN;
+        }
+        double speed = (newest.x() - previous.x()) / (spanMs / 1000.0);
+        double previousSpeed = (previous.x() - beforePrevious.x()) / (previousSpanMs / 1000.0);
+        if (speed == 0 || Math.signum(speed) != Math.signum(previousSpeed))
+        {
+            return Double.NaN; // Jitter (or the first value after a reversal): no direction yet
+        }
+        return Math.clamp(speed, -MAX_INPUT_SPEED, MAX_INPUT_SPEED);
     }
 
     /**

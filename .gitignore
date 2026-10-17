@@ -5,6 +5,7 @@ target/
 dependency-reduced-pom.xml
 
 logs/*
+profiles/*
 OscGoesBrrr-main/*
 example/*
 libsource/*

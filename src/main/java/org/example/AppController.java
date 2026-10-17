@@ -3,6 +3,7 @@ package org.example;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
 import org.example.config.ConnectionType;
+import org.example.diagnostics.StepResponseCalibration;
 import org.example.handy.ble.HandyBleAdapter;
 import org.example.handy.ble.HandyClientBle;
 import org.example.handy.common.HandyClient;
@@ -17,6 +18,7 @@ import org.example.processor.SpsType;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -90,6 +92,10 @@ public class AppController implements AutoCloseable
     /** The processor of a running test mode session (null otherwise), fed by {@link #feedTestInput}. */
     private volatile ParameterProcessor testProcessor;
     private volatile SpsType testSpsType;
+    /** True while the step-response calibration owns the device. */
+    private volatile boolean calibrationRunning;
+    /** Set by {@link #stop()} / {@link #close()} to abort a running calibration. */
+    private volatile boolean calibrationCancelled;
 
     /**
      * @param statusListener   notified (on a background thread) whenever the status changes
@@ -185,8 +191,79 @@ public class AppController implements AutoCloseable
         });
     }
 
+    /**
+     * Runs the step-response calibration instead of processing movement. The running session is stopped first (the
+     * device stays connected), the calibration writes a CSV file to {@code logs/diagnostics/}, and the session is
+     * started again with the same settings afterwards.
+     * <p>
+     * The calibration sends a series of known full-stroke and short slow moves and reads the slider position as fast as the device
+     * answers. It needs a direct Bluetooth connection and a clear device; it takes about four minutes.
+     *
+     * @param config settings the session is restarted with
+     */
+    public void runStepResponseCalibration(ConfigProperties config)
+    {
+        worker.execute(() ->
+        {
+            if (calibrationRunning)
+            {
+                return;
+            }
+            if (status.state() != State.RUNNING)
+            {
+                setStatus(State.ERROR, "Start the device before running the step-response calibration.");
+                return;
+            }
+            calibrationRunning = true;
+            calibrationCancelled = false;
+            boolean test = testMode;
+            stopSession(false);
+            setStatus(State.RUNNING, "Step-response calibration: starting...");
+            try
+            {
+                Path file = StepResponseCalibration.run(client,
+                        message ->
+                        {
+                            if (!calibrationCancelled)
+                            {
+                                setStatus(State.RUNNING, message);
+                            }
+                        },
+                        () -> calibrationCancelled);
+                if (calibrationCancelled)
+                {
+                    log.info("Step-response calibration cancelled, partial file: {}", file.toAbsolutePath());
+                    setStatus(State.STOPPED, "Calibration cancelled. Partial file: " + file.toAbsolutePath());
+                    return;
+                }
+                log.info("Step-response calibration saved to {}", file.toAbsolutePath());
+                String profileNote = config.hdspUseDeviceProfile()
+                        ? " The measured device limits are used automatically." : "";
+                startSession(config, test);
+                if (status.state() == State.RUNNING)
+                {
+                    setStatus(State.RUNNING, "Calibration saved to " + file.toAbsolutePath() + profileNote
+                            + (test ? " Test mode is running again." : " Processing is running again."));
+                }
+            }
+            catch (Exception e)
+            {
+                log.error("Step-response calibration failed", e);
+                setStatus(State.ERROR, "Step-response calibration failed: " + describe(e));
+            }
+            finally
+            {
+                calibrationRunning = false;
+            }
+        });
+    }
+
     public void stop()
     {
+        if (calibrationRunning)
+        {
+            calibrationCancelled = true;
+        }
         // Stopping the device can take a few seconds, so the status changes right away (the GUI disables the button
         // and shows that the app is working on it) instead of when the worker has finished.
         if (status.state() == State.RUNNING)
@@ -205,6 +282,10 @@ public class AppController implements AutoCloseable
     @Override
     public void close()
     {
+        if (calibrationRunning)
+        {
+            calibrationCancelled = true;
+        }
         worker.execute(() ->
         {
             stopSession(true);

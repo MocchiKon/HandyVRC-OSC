@@ -1,6 +1,7 @@
 package org.example.processor;
 
 import org.example.config.ConfigProperties;
+import org.example.diagnostics.DeviceProfile;
 import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
@@ -621,9 +622,154 @@ class HdspSmoothedParameterProcessorTest
                 furthest = position;
                 continue;
             }
+            // The 15% speed-change default can trigger one small correction while the device is already moving
+            // at its minimum speed; 2% of the stroke is still below a visible pull-back.
             assertThat((furthest - position) * direction).as("slider moved back at %sms", sinceStart)
-                    .isLessThan(0.015);
+                    .isLessThan(0.02);
         }
+    }
+
+    @Test
+    void aConfiguredMaximumSpeedIsNotExceeded()
+    {
+        var harness = new Harness(ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .hdspMinSliderSpeed(0)
+                .hdspMaxSliderSpeed(200)
+                .build());
+        // 2 Hz full stroke: peak input speed is about 314%/s, above the configured 200mm/s maximum
+        harness.run(2000, t -> 0.5 - 0.5 * Math.cos(2 * Math.PI * t / 500.0));
+
+        assertThat(harness.movingCalls()).isNotEmpty();
+        assertThat(harness.movingCalls())
+                .allSatisfy(call -> assertThat(call.speedPercentPerSecond())
+                        .as("commanded speed at %sms", call.at() - harness.startTimeMs())
+                        .isLessThanOrEqualTo(200.5));
+    }
+
+    @Test
+    void commandDelayIsCompensated()
+    {
+        // A real Handy starts moving about 140ms after the command; without compensation the slider trails the
+        // input by that time for the whole stroke (a quarter of a stroke at 1 stroke/s).
+        DoubleUnaryOperator input = t -> 0.5 - 0.5 * Math.cos(2 * Math.PI * t / 1000.0);
+        var plain = new Harness(Harness.handyConfig(), 140, 0, 0.3);
+        plain.run(3000, input);
+        var compensated = new Harness(Harness.handyConfig(), 140, 0, 0.3);
+        compensated.processor.setMotionStartMsForTest(140);
+        compensated.run(3000, input);
+
+        double plainError = trackingRmse(plain, input);
+        double compensatedError = trackingRmse(compensated, input);
+        assertThat(compensatedError)
+                .as("tracking RMSE with compensation %.1f%% vs %.1f%% without", compensatedError * 100,
+                        plainError * 100)
+                .isLessThan(plainError * 0.9);
+    }
+
+    private static double trackingRmse(Harness harness, DoubleUnaryOperator input)
+    {
+        double sum = 0;
+        int count = 0;
+        for (long t = 1000; t <= 3000; t += 10)
+        {
+            double expected = input.applyAsDouble(t);
+            double actual = harness.sliderPositionAt(harness.startTimeMs() + t);
+            sum += (expected - actual) * (expected - actual);
+            count++;
+        }
+        return Math.sqrt(sum / count);
+    }
+
+    @Test
+    void aDeviceProfileLimitsTheMovementToItsSingleMeasuredMaximum()
+    {
+        // The profile measures 400 mm/s up and 200 mm/s down, which gives one suggested maximum of 200 mm/s.
+        var profile = new DeviceProfile("test", "2026-10-18T12:00:00", 100, 100,
+                400, 200, 200, 0);
+        var harness = new Harness(ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .hdspMinSliderSpeed(0)
+                .hdspMaxSliderSpeed(0)
+                .hdspUseDeviceProfile(true)
+                .build(), 0, 0, 0, Double.NaN, profile);
+
+        // 2 Hz full stroke: the input is faster than the measured device in both directions
+        harness.run(2000, t -> 0.5 - 0.5 * Math.cos(2 * Math.PI * t / 500.0));
+
+        assertThat(harness.movingCalls()).isNotEmpty();
+        for (RecordedCall call : harness.movingCalls())
+        {
+            assertThat(call.speedPercentPerSecond())
+                    .as("commanded speed towards %s at %sms", call.xp(), call.at() - harness.startTimeMs())
+                    .isLessThanOrEqualTo(200.5);
+        }
+    }
+
+    @Test
+    void aCalibratedOneMillimeterPerSecondDeviceFollowsAOneMillimeterPerSecondInput()
+    {
+        // A Handy 2 Pro with overclocking can move at 1 mm/s. With its profile the input stop threshold has to go
+        // below 1%/s as well, otherwise the device would never start for such a slow movement.
+        var profile = new DeviceProfile("slow", "2026-10-18T12:00:00", 100, 100,
+                0, 0, 0, 1);
+        var harness = new Harness(ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .hdspMinSliderSpeed(0)
+                .hdspUseDeviceProfile(true)
+                .build(), 0, 0, 0.01, Double.NaN, profile);
+
+        // 1%/s for 8 seconds: the input moves 8% of the stroke
+        harness.run(8000, t -> 0.5 + 0.01 * t / 1000.0);
+
+        assertThat(harness.client.calls).isNotEmpty();
+        assertThat(harness.sliderPositionAt(harness.virtualTimeMs()))
+                .isCloseTo(harness.lastInputPosition(), within(0.08));
+    }
+
+    @Test
+    void fastStrokesKeepTheirAmplitude()
+    {
+        // 150 strokes per minute (the fastest the test mode can do): a stroke lasts 400ms, so a speed measurement
+        // that needs a few values must not make the slider miss the ends of the stroke. The device receives the
+        // commands 50ms after they are sent, like a Handy over BLE.
+        var harness = new Harness(Harness.handyConfig(), 50, 0, 0.3);
+        harness.runVrchat(3000, t -> 0.5 - 0.5 * Math.cos(2 * Math.PI * 2.5 * t / 1000.0), 0.005);
+
+        double min = 1;
+        double max = 0;
+        for (long t = harness.startTimeMs() + 1000; t <= harness.virtualTimeMs(); t += TICK_MS)
+        {
+            double position = harness.sliderPositionAt(t);
+            min = Math.min(min, position);
+            max = Math.max(max, position);
+        }
+        // The stroke is followed over (nearly) its full length: the slider is behind by a fraction of a stroke,
+        // not by a quarter of it (which is what a moderate resync speed and the long speed window left)
+        assertThat(max).as("top of the fast strokes").isGreaterThan(0.94);
+        assertThat(min).as("bottom of the fast strokes").isLessThan(0.06);
+        assertThat(max - min).as("amplitude of the fast strokes").isGreaterThan(0.89);
+    }
+
+    @Test
+    void aFastMovementIsFollowedInsteadOfBeingBroughtToTheInputAtTheResyncSpeed()
+    {
+        // The input rests at the top, then moves a full stroke in 100ms while the slider is at the top as well.
+        // The first values move the input far before the speed window can fill; the slider has to follow them, not
+        // crawl to the input at the moderate resync speed (50%/s), which would need two seconds for this stroke.
+        var harness = new Harness(Harness.defaultConfig(), 0, 0, 0, 1.0);
+        harness.feed(1.0f);
+        harness.advance(100);
+        long startedAt = harness.virtualTimeMs();
+        harness.runVrchat(200, t -> Math.max(0, 1.0 - 10.0 * t / 1000.0), 0.005);
+
+        RecordedCall first = harness.movingCalls().getFirst();
+        assertThat(first.speedPercentPerSecond()).as("speed of the first move").isGreaterThan(300);
+        // And the slider actually got away from the top while the input moved
+        assertThat(harness.sliderPositionAt(startedAt + 100)).as("slider after 100ms").isLessThan(0.7);
     }
 
     private static double profilePosition(double[][] profile, long t)
@@ -754,6 +900,12 @@ class HdspSmoothedParameterProcessorTest
         Harness(ConfigProperties config, long commandLatencyMs, long commandLatencyJitterMs, double deviceMinSpeed,
                 double initialDevicePosition)
         {
+            this(config, commandLatencyMs, commandLatencyJitterMs, deviceMinSpeed, initialDevicePosition, null);
+        }
+
+        Harness(ConfigProperties config, long commandLatencyMs, long commandLatencyJitterMs, double deviceMinSpeed,
+                double initialDevicePosition, DeviceProfile profile)
+        {
             this.initialDevicePosition = initialDevicePosition;
             this.commandLatencyMs = commandLatencyMs;
             this.commandLatencyJitterMs = commandLatencyJitterMs;
@@ -761,7 +913,7 @@ class HdspSmoothedParameterProcessorTest
             this.client = new RecordingHandyClient(this);
             this.lastInputSentMs = virtualTimeMs; // The first value is fed on the first tick
             this.orifice = config.spsType() == SpsType.ORIFICE;
-            this.processor = new HdspSmoothedParameterProcessor(client, config)
+            this.processor = new HdspSmoothedParameterProcessor(client, config, profile)
             {
                 @Override
                 protected long nowMs()

@@ -3,6 +3,7 @@ package org.example.handy.ble;
 import dev.handy.proto.HandyRpc;
 import dev.handy.proto.Messages;
 import lombok.extern.slf4j.Slf4j;
+import org.example.diagnostics.DiagnosticTrace;
 import org.example.handy.common.*;
 import org.example.handy.common.dto.SliderSettingsResult;
 import org.example.handy.common.dto.SliderState;
@@ -15,6 +16,11 @@ public class HandyClientBle extends HandyClient
     private final HandyBleAdapter ble;
     private final HandyRpcClient rpc;
     private final RateLimitedLogger notificationWarnings = new RateLimitedLogger(log);
+    /** Time of the last XPT command, used to say how long after it a notification arrived. */
+    private volatile long lastXptAtNanos;
+    private volatile float lastXp = Float.NaN;
+    private volatile int lastT;
+    private volatile boolean lastStop;
 
     public HandyClientBle(HandyBleAdapter ble)
     {
@@ -46,10 +52,22 @@ public class HandyClientBle extends HandyClient
     }
 
     @Override
+    public String getDeviceIdentifier()
+    {
+        return ble.getIdentifier();
+    }
+
+    @Override
     public HandyBaseResponseWithError hdspXpt(float xp, int t, boolean stopOnTarget)
     {
         try
         {
+            // Remember the command before writing it, so that a notification which arrives while the write is
+            // still in flight is already attributed to it.
+            lastXp = xp;
+            lastT = t;
+            lastStop = stopOnTarget;
+            lastXptAtNanos = System.nanoTime();
             // Fire-and-forget: HDSP commands are sent continuously, waiting for a response would stall the stream.
             // The position is already normalized (0.0-1.0) by the processor, which owns the HDSP position unit.
             rpc.sendRequestFireAndForget(HandyRpc.Request.newBuilder()
@@ -59,6 +77,11 @@ public class HandyClientBle extends HandyClient
                             .setStopOnTarget(stopOnTarget)
                             .build()));
 
+            DiagnosticTrace trace = DiagnosticTrace.active();
+            if (trace != null)
+            {
+                trace.event("xpt", "xp", xp, "t", t, "stopOnTarget", stopOnTarget);
+            }
             log.trace("[BLE HDSP] Sent XPT (xp={}, t={}ms, stopOnTarget={})", xp, t, stopOnTarget);
             return new HandyBaseResponseWithError(null);
         }
@@ -162,8 +185,24 @@ public class HandyClientBle extends HandyClient
      */
     private void onNotification(HandyRpc.Notification notification)
     {
+        long sinceXptMs = lastXptAtNanos == 0 ? -1 : (System.nanoTime() - lastXptAtNanos) / 1_000_000L;
+        String sinceXpt = sinceXptMs < 0
+                ? "no XPT yet"
+                : "+%dms after XPT xp=%s t=%dms stopOnTarget=%s".formatted(sinceXptMs, lastXp, lastT, lastStop);
+        DiagnosticTrace trace = DiagnosticTrace.active();
+        if (trace != null)
+        {
+            trace.event("notification",
+                    "notification", notification.getNotificationCase().name(),
+                    "sinceXptMs", sinceXptMs,
+                    "lastXp", lastXptAtNanos == 0 ? null : lastXp,
+                    "lastT", lastXptAtNanos == 0 ? null : lastT,
+                    "lastStopOnTarget", lastXptAtNanos == 0 ? null : lastStop);
+        }
         switch (notification.getNotificationCase())
         {
+            case NOTIFICATION_HDSP_CHANGED -> log.debug("[BLE] Notification: NOTIFICATION_HDSP_CHANGED ({})", sinceXpt);
+            case NOTIFICATION_MODE_CHANGED -> log.debug("[BLE] Notification: NOTIFICATION_MODE_CHANGED ({})", sinceXpt);
             case NOTIFICATION_LOW_MEMORY_ERROR -> notificationWarnings.warn(
                     "[BLE] Device dropped a message of %d bytes because it ran out of memory (available heap %d, largest free block %d)"
                             .formatted(notification.getNotificationLowMemoryError().getDiscardedMsgSize(),
@@ -175,9 +214,9 @@ public class HandyClientBle extends HandyClient
                     "[BLE] Device reported an error: code=%d msg=%s".formatted(notification.getNotificationError().getCode(),
                             notification.getNotificationError().getMessage()));
             case NOTIFICATION_TEMP_HIGH -> notificationWarnings.warn("[BLE] Device is overheating and may stop moving");
-            case NOTIFICATION_SLIDER_BLOCKED -> notificationWarnings.warn("[BLE] Slider is blocked");
-            case NOTIFICATION_IDLE_TIMEOUT -> log.warn("[BLE] Device is idle and will disconnect/sleep soon");
-            default -> log.trace("[BLE] Notification: {}", notification.getNotificationCase());
+            case NOTIFICATION_SLIDER_BLOCKED -> notificationWarnings.warn("[BLE] Slider is blocked ({})".formatted(sinceXpt));
+            case NOTIFICATION_IDLE_TIMEOUT -> log.warn("[BLE] Device is idle and will disconnect/sleep soon ({})", sinceXpt);
+            default -> log.trace("[BLE] Notification: {} ({})", notification.getNotificationCase(), sinceXpt);
         }
     }
 }

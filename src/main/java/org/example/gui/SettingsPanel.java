@@ -3,14 +3,19 @@ package org.example.gui;
 import org.example.config.ConfigProperties;
 import org.example.config.ConnectionType;
 import org.example.config.InteractWith;
+import org.example.diagnostics.DeviceProfile;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
+import java.lang.reflect.RecordComponent;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 
@@ -20,7 +25,8 @@ import static org.example.gui.SettingRows.*;
  * The "Basic" and "Advanced" settings pages. Every change is reported right away (with the complete new settings)
  * to the change listener, which saves them.
  * <p>
- * The Advanced page only shows the options of the processing mode selected on the Basic page.
+ * The change is also logged, but after a short delay: a slider reports every step of a drag and only its final value
+ * is useful. The Advanced page only shows the options of the processing mode selected on the Basic page.
  */
 public class SettingsPanel extends JPanel
 {
@@ -28,9 +34,24 @@ public class SettingsPanel extends JPanel
     private static final String ADVANCED = "advanced";
     private static final String LOGS = "logs";
     private static final List<String> LOG_LEVELS = List.of("TRACE", "DEBUG", "INFO", "WARN", "ERROR");
+    private static final Logger log = LoggerFactory.getLogger(SettingsPanel.class);
+    /** A slider reports every pixel, so the changed settings are logged once the user stopped moving it. */
+    private static final int SETTING_LOG_DELAY_MS = 350;
+    private static final String CALIBRATION_TOOLTIP = "Sends known full-stroke and short slow moves, records the"
+            + " device response in logs/diagnostics/ and writes the profile to profiles/. Takes about four minutes,"
+            + " needs a direct Bluetooth connection, and temporarily stops the running session. The measured limits"
+            + " are used automatically afterwards.";
+    private static final String CALIBRATION_INTIFACE_TOOLTIP = "Calibration needs a Direct Bluetooth connection:"
+            + " Intiface cannot report the slider position. Change Connection to Direct on the Basic tab.";
 
     private ConfigProperties config;
+    /** The settings as they were when the last change was logged, used to find what changed. */
+    private ConfigProperties loggedConfig;
+    /** The newest calibration profile, shown in the speed fields when the measured limits are used. */
+    private DeviceProfile deviceProfile;
     private final Consumer<ConfigProperties> changeListener;
+    private final Runnable onCalibrate;
+    private final Timer settingLogTimer = new Timer(SETTING_LOG_DELAY_MS, e -> logSettingChangesWhenIdle());
     /** True while the controls are set from the settings, so that doing so does not count as a change. */
     private boolean updating;
 
@@ -59,16 +80,29 @@ public class SettingsPanel extends JPanel
     private final WrappingText advancedModeHint = new WrappingText("", Theme.regular(12.5f), Theme.TEXT_MUTED);
     private final RoundedPanel smoothedSection = section("Smoothed mode");
     private final RoundedPanel directSection = section("Direct mode");
-    private final ModernSlider speedChangeThreshold = new ModernSlider(5, 100, 1, 25);
+    private final ModernSlider speedChangeThreshold = new ModernSlider(5, 100, 1, 15);
     private final ModernSlider speedStopThreshold = new ModernSlider(1, 50, 1, 15);
     private final ModernSlider divergenceThreshold = new ModernSlider(5, 60, 1, 20);
-    private final ModernSlider speedMeasureWindow = new ModernSlider(50, 500, 10, 150);
+    private final ModernSlider speedMeasureWindow = new ModernSlider(50, 500, 10, 100);
+    private final ToggleSwitch useDeviceProfile = new ToggleSwitch(true);
     private final ModernSlider minSliderSpeed = new ModernSlider(0, 100, 1, 30);
+    private final ModernSlider maxSliderSpeed = new ModernSlider(0, 2000, 10, 0);
     /** Tenths of a percent, so that half percent steps are possible. */
     private final ModernSlider reversalMinDistance = new ModernSlider(0, 100, 5, 20);
     private final ToggleSwitch logDevicePosition = new ToggleSwitch(false);
+    private final ModernSlider deviceLogInterval = new ModernSlider(20, 2000, 10, 200);
+    private final ToggleSwitch diagnosticTrace = new ToggleSwitch(false);
+    /** The two diagnostic rows are hidden until position logging is on. */
+    private JComponent deviceLogIntervalRow;
+    private JComponent deviceLogIntervalSpacer;
+    private JComponent diagnosticTraceRow;
+    private JComponent diagnosticTraceSpacer;
+    /** Button moved here from Test mode; only shown for Smoothed mode with the measured profile enabled. */
+    private ModernButton calibrateButton;
+    private JComponent calibrateButtonRow;
+    private JComponent calibrateButtonSpacer;
     private final ModernSlider minimalValueChange = new ModernSlider(0, 20, 1, 3);
-    private final ToggleSwitch pauseOnStarving = new ToggleSwitch(false);
+    private final ToggleSwitch pauseOnStarving = new ToggleSwitch(true);
     private final ModernSlider sendMessageEvery = new ModernSlider(0, 200, 5, 0);
     private final ToggleSwitch checkForUpdates = new ToggleSwitch(true);
     private final SegmentedControl<String> logLevel = new SegmentedControl<>(List.of(
@@ -85,11 +119,14 @@ public class SettingsPanel extends JPanel
     private final CardLayout pages = new CardLayout();
     private final JPanel pageHolder = new JPanel(pages);
 
-    public SettingsPanel(ConfigProperties initialConfig, Consumer<ConfigProperties> changeListener)
+    public SettingsPanel(ConfigProperties initialConfig, Consumer<ConfigProperties> changeListener,
+                         Runnable onCalibrate)
     {
         super(new BorderLayout(0, 12));
         this.config = initialConfig;
         this.changeListener = changeListener;
+        this.onCalibrate = onCalibrate;
+        this.settingLogTimer.setRepeats(false);
         setOpaque(false);
 
         connection = new SegmentedControl<>(List.of(
@@ -105,7 +142,7 @@ public class SettingsPanel extends JPanel
                 new SegmentedControl.Option<>(SpsType.PENETRATOR, "Penetrator",
                         "Your avatar has an SPS penetrator. The device follows how deep it is inside an orifice."),
                 new SegmentedControl.Option<>(SpsType.ORIFICE, "Orifice",
-                        "Your avatar has an SPS orifice (also useful when someone else runs this app for you). The"
+                        "Your avatar has an SPS orifice (can be used to turn The Handy into thrusting machine). The"
                                 + " device follows how deep a penetrator is inside it; the penetrator length is"
                                 + " detected automatically.")),
                 initialConfig.spsType(), false);
@@ -144,7 +181,9 @@ public class SettingsPanel extends JPanel
         add(pageHolder, BorderLayout.CENTER);
 
         installListeners();
+        installSliderCommitListeners();
         setConfig(initialConfig);
+        refreshDeviceProfile();
     }
 
     public ConfigProperties getConfig()
@@ -155,6 +194,7 @@ public class SettingsPanel extends JPanel
     /** Shows the given settings without reporting them as a change. */
     public void setConfig(ConfigProperties newConfig)
     {
+        settingLogTimer.stop();
         config = newConfig;
         updating = true;
         try
@@ -186,10 +226,16 @@ public class SettingsPanel extends JPanel
             speedStopThreshold.setValue(orDefault(newConfig.hdspSpeedStopThresholdPercent(), defaults.hdspSpeedStopThresholdPercent()));
             divergenceThreshold.setValue(orDefault(newConfig.hdspDivergenceThresholdPercent(), defaults.hdspDivergenceThresholdPercent()));
             speedMeasureWindow.setValue(orDefault(newConfig.hdspSpeedMeasureWindowMs(), defaults.hdspSpeedMeasureWindowMs()));
+            useDeviceProfile.setSelected(newConfig.hdspUseDeviceProfile());
             minSliderSpeed.setValue(orDefault(newConfig.hdspMinSliderSpeed(), defaults.hdspMinSliderSpeed()));
+            maxSliderSpeed.setValue(orDefault(newConfig.hdspMaxSliderSpeed(), defaults.hdspMaxSliderSpeed()));
+            updateProfileControls();
             reversalMinDistance.setValue(Math.round(orDefault(newConfig.hdspReversalMinDistancePercent(),
                     defaults.hdspReversalMinDistancePercent()) * 10));
             logDevicePosition.setSelected(newConfig.hdspLogDevicePosition());
+            deviceLogInterval.setValue(orDefault(newConfig.hdspDevicePositionLogIntervalMs(),
+                    defaults.hdspDevicePositionLogIntervalMs()));
+            diagnosticTrace.setSelected(newConfig.hdspDiagnosticTrace());
             minimalValueChange.setValue(newConfig.minimalValueChange());
             pauseOnStarving.setSelected(newConfig.pauseOnStarving());
             sendMessageEvery.setValue(newConfig.sendMessageEveryMs());
@@ -202,6 +248,8 @@ public class SettingsPanel extends JPanel
             updating = false;
         }
         refreshDependentControls();
+        loggedConfig = config;
+        updateProfileDisplay();
     }
 
     private void update(UnaryOperator<ConfigProperties.ConfigPropertiesBuilder> change)
@@ -213,6 +261,68 @@ public class SettingsPanel extends JPanel
         config = change.apply(config.toBuilder()).build();
         refreshDependentControls();
         changeListener.accept(config);
+        settingLogTimer.restart();
+    }
+
+    /**
+     * Logs any change that is not a slider drag. Sliders are committed on mouse release (or key press), so that
+     * holding a slider still does not log a value that is not final yet.
+     */
+    private void logSettingChangesWhenIdle()
+    {
+        if (sliders().stream().anyMatch(ModernSlider::isDragging))
+        {
+            settingLogTimer.restart();
+            return;
+        }
+        logSettingChanges(loggedConfig, config, "Setting changed");
+        loggedConfig = config;
+    }
+
+    /** Called when a slider is released (or changed with the keyboard): logs its final value immediately. */
+    private void commitSliderChange()
+    {
+        settingLogTimer.stop();
+        logSettingChanges(loggedConfig, config, "Setting changed");
+        loggedConfig = config;
+    }
+
+    private void logSettingChanges(ConfigProperties before, ConfigProperties after, String prefix)
+    {
+        if (before == null || before == after)
+        {
+            return;
+        }
+        for (RecordComponent component : ConfigProperties.class.getRecordComponents())
+        {
+            try
+            {
+                Object oldValue = component.getAccessor().invoke(before);
+                Object newValue = component.getAccessor().invoke(after);
+                if (!Objects.equals(oldValue, newValue))
+                {
+                    log.info("{}: {} = {} (was {})", prefix, component.getName(), settingValue(newValue),
+                            settingValue(oldValue));
+                }
+            }
+            catch (ReflectiveOperationException e)
+            {
+                log.debug("Could not compare the setting {}: {}", component.getName(), e.getMessage());
+            }
+        }
+    }
+
+    private static String settingValue(Object value)
+    {
+        if (value == null)
+        {
+            return "null";
+        }
+        if (value instanceof String text)
+        {
+            return text.isBlank() ? "(empty)" : text;
+        }
+        return String.valueOf(value);
     }
 
     /** Updates everything that depends on other settings (visible options, defaults, validation). */
@@ -231,6 +341,8 @@ public class SettingsPanel extends JPanel
         boolean smoothed = config.processingAlgorithm() == ParameterProcessorType.HDSP_SMOOTHED;
         smoothedSection.setVisible(smoothed);
         directSection.setVisible(!smoothed);
+        updateDiagnosticsVisibility();
+        updateCalibrateVisibility();
         advancedModeHint.setText("Options of %s mode (the mode is selected on the Basic tab)."
                 .formatted(config.processingAlgorithm().getLabel()));
 
@@ -329,9 +441,25 @@ public class SettingsPanel extends JPanel
         speedStopThreshold.addChangeListener(e -> update(b -> b.hdspSpeedStopThresholdPercent(speedStopThreshold.getValue())));
         divergenceThreshold.addChangeListener(e -> update(b -> b.hdspDivergenceThresholdPercent(divergenceThreshold.getValue())));
         speedMeasureWindow.addChangeListener(e -> update(b -> b.hdspSpeedMeasureWindowMs(speedMeasureWindow.getValue())));
+        useDeviceProfile.addChangeListener(e ->
+        {
+            update(b -> b.hdspUseDeviceProfile(useDeviceProfile.isSelected()));
+            refreshDeviceProfile();
+        });
         minSliderSpeed.addChangeListener(e -> update(b -> b.hdspMinSliderSpeed(minSliderSpeed.getValue())));
+        maxSliderSpeed.addChangeListener(e -> update(b -> b.hdspMaxSliderSpeed(maxSliderSpeed.getValue())));
         reversalMinDistance.addChangeListener(e -> update(b -> b.hdspReversalMinDistancePercent(reversalMinDistance.getValue() / 10f)));
-        logDevicePosition.addChangeListener(e -> update(b -> b.hdspLogDevicePosition(logDevicePosition.isSelected())));
+        logDevicePosition.addChangeListener(e ->
+        {
+            update(b -> b.hdspLogDevicePosition(logDevicePosition.isSelected()));
+            if (!logDevicePosition.isSelected() && diagnosticTrace.isSelected())
+            {
+                diagnosticTrace.setSelected(false);
+            }
+            updateDiagnosticsVisibility();
+        });
+        deviceLogInterval.addChangeListener(e -> update(b -> b.hdspDevicePositionLogIntervalMs(deviceLogInterval.getValue())));
+        diagnosticTrace.addChangeListener(e -> update(b -> b.hdspDiagnosticTrace(diagnosticTrace.isSelected())));
         minimalValueChange.addChangeListener(e -> update(b -> b.minimalValueChange(minimalValueChange.getValue())));
         pauseOnStarving.addChangeListener(e -> update(b -> b.pauseOnStarving(pauseOnStarving.isSelected())));
         sendMessageEvery.addChangeListener(e -> update(b -> b.sendMessageEveryMs(sendMessageEvery.getValue())));
@@ -436,7 +564,7 @@ public class SettingsPanel extends JPanel
         addRow(movement, sliderRow("Fully penetrated at",
                 "Penetration that counts as fully penetrated, so that you reach the bottom of the stroke without"
                         + " having to go all the way in. With 50% a penetration of 25% already moves the device"
-                        + " halfway. 100% turns this off.",
+                        + " halfway. 100% turns this off. Recommended to set it to ~85% to avoid movement reversal when going past penetrator base.",
                 fullyPenetratedAt, value -> value + "%"));
         addRow(movement, toggleRow("Reverse movement", null,
                 "Turns the movement upside down: the device moves up as you go in and down as you pull out,"
@@ -507,33 +635,64 @@ public class SettingsPanel extends JPanel
                 divergenceThreshold, value -> value + "%"));
         addRow(smoothedSection, sliderRow("Speed measure window",
                 "Time span your speed is measured over. Shorter follows speed changes faster but reacts to jitter"
-                        + " more, longer is steadier but lags behind. 150 ms suits strokes up to about one per second,"
-                        + " try 100 ms for faster strokes.",
+                        + " more, longer is steadier but lags behind. 100 ms is a good default for fast strokes;"
+                        + " raise it only if a slow movement makes the device twitch.",
                 speedMeasureWindow, value -> value + " ms"));
+        addRow(smoothedSection, toggleRow("Use calibrated device limits", null,
+                "Reads the newest device-profile JSON written by Calibrate device and uses its measured minimum"
+                        + " speed, single maximum speed and motion start. This is what makes a Handy 1, a Handy 2 Pro"
+                        + " or a worn Handy 1 drive correctly without copying numbers. Turn it off to use the two"
+                        + " speed values below.",
+                useDeviceProfile));
+        calibrateButton = new ModernButton("Calibrate device", ModernButton.Style.GHOST);
+        calibrateButton.setToolTipText(Theme.tooltip(CALIBRATION_TOOLTIP));
+        calibrateButton.addActionListener(e -> confirmCalibration());
+        calibrateButtonRow = controlRow("Device calibration",
+                "Measure the device so the app can use its real minimum and maximum speed.", calibrateButton);
+        calibrateButtonSpacer = addRow(smoothedSection, calibrateButtonRow);
         addRow(smoothedSection, sliderRow("Minimum device speed",
-                "Slowest speed the device moves with. A Handy does not move slower than about 30 mm/s, so slower"
-                        + " movements are followed in short pulses instead. Raise it if the device runs past slow"
-                        + " movements; 0 turns the pulses off.",
+                "Used only when 'Use calibrated device limits' is off or calibration wasn't performed. Slowest speed the device moves with. A Handy 1"
+                        + " does not move much slower than about 33 mm/s, so slower movements are followed in short"
+                        + " pulses instead. A Handy 2 Pro with overclocking can move slower; its calibration measures"
+                        + " that automatically.",
                 minSliderSpeed, value -> value == 0 ? "Off" : value + " mm/s"));
+        addRow(smoothedSection, sliderRow("Maximum device speed",
+                "Used only when 'Use calibrated device limits' is off or calibration wasn't performed. Highest speed the device can move (mm/s); 0"
+                        + " leaves it unlimited. A Handy 1 measures about 370-430 mm/s, a Handy 2 or 2 Pro is higher;"
+                        + " the calibration measures the single lower-direction limit automatically.",
+                maxSliderSpeed, value -> value == 0 ? "No limit" : value + " mm/s"));
         addRow(smoothedSection, sliderRow("Reversal distance",
                 "How far (in % of the stroke) you have to move back before it counts as a change of direction."
                         + " Until then the device just stops, so the jitter of a slow movement cannot make it reverse."
                         + " Raise it if the device twitches back and forth while you move slowly.",
                 reversalMinDistance, value -> "%.1f%%".formatted(value / 10f)));
         addRow(smoothedSection, toggleRow("Log device position", "Diagnostics, leave off for normal use",
-                "Logs the position the device reports (log level DEBUG) every 200 ms next to the position the app"
-                        + " believes it is at. Every report is an extra Bluetooth request. Direct connection only:"
-                        + " Intiface cannot report the position.",
+                "Logs the position the device reports (log level DEBUG) next to the position the app believes it"
+                        + " is at, with the active move and the newest input value. Every report is an extra Bluetooth"
+                        + " request. Direct connection only: Intiface cannot report the position.",
                 logDevicePosition));
+        deviceLogIntervalRow = sliderRow("Device log interval",
+                "How often the device position is read while logging. Each read is a Bluetooth round trip (about"
+                        + " 100 ms), so the time between two samples is this interval plus that round trip. A short"
+                        + " interval adds traffic and can delay the movement commands; use 50 ms only for a short"
+                        + " diagnostic run. 200 ms is the normal setting.",
+                deviceLogInterval, value -> value + " ms");
+        deviceLogIntervalSpacer = addRow(smoothedSection, deviceLogIntervalRow);
+        diagnosticTraceRow = toggleRow("Write diagnostic trace", "Structured data for analysis",
+                "Writes values, commands, device samples and Bluetooth notifications to a JSONL file in"
+                        + " logs/diagnostics/. The file is easier to analyze than the text log and is only written"
+                        + " while this is on.",
+                diagnosticTrace);
+        diagnosticTraceSpacer = addRow(smoothedSection, diagnosticTraceRow);
         page.add(smoothedSection);
 
         addRow(directSection, sliderRow("Minimal value change",
                 "Smallest change of the position (in % of the stroke) that is sent to the device. Higher values"
                         + " filter out more jitter but make small movements coarser.",
                 minimalValueChange, value -> value + "%"));
-        addRow(directSection, toggleRow("Pause on starving", "Stop at every position instead of moving on",
-                "The device stops when it reaches a position, instead of carrying on while it waits for the next"
-                        + " one. Avoids overshooting, but the movement can feel choppier.",
+        addRow(directSection, toggleRow("Pause on starving", "Stop at every position instead of moving on (on by default)",
+                "Direct mode only. The device stops when it reaches a position, instead of carrying on while it waits"
+                        + " for the next one. Avoids overshooting, but the movement can feel choppier.",
                 pauseOnStarving));
         page.add(directSection);
         page.add(Box.createVerticalStrut(12));
@@ -544,7 +703,7 @@ public class SettingsPanel extends JPanel
                         + " the device connection. In Smoothed mode this only spaces out speed corrections, stops"
                         + " are always sent right away.",
                 sendMessageEvery, value -> value <= 20 ? "20 ms (minimum)" : value + " ms"));
-        addRow(general, toggleRow("Check for updates", "Look for a new version on startup",
+        addRow(general, toggleRow("Check for updates", null,
                 "Checks GitHub on startup whether a newer version was released and lets you know. The check runs in"
                         + " the background and never blocks the app.",
                 checkForUpdates));
@@ -558,9 +717,13 @@ public class SettingsPanel extends JPanel
                 .hdspSpeedStopThresholdPercent(defaults.hdspSpeedStopThresholdPercent())
                 .hdspDivergenceThresholdPercent(defaults.hdspDivergenceThresholdPercent())
                 .hdspSpeedMeasureWindowMs(defaults.hdspSpeedMeasureWindowMs())
+                .hdspUseDeviceProfile(defaults.hdspUseDeviceProfile())
                 .hdspMinSliderSpeed(defaults.hdspMinSliderSpeed())
+                .hdspMaxSliderSpeed(defaults.hdspMaxSliderSpeed())
                 .hdspReversalMinDistancePercent(defaults.hdspReversalMinDistancePercent())
                 .hdspLogDevicePosition(defaults.hdspLogDevicePosition())
+                .hdspDevicePositionLogIntervalMs(defaults.hdspDevicePositionLogIntervalMs())
+                .hdspDiagnosticTrace(defaults.hdspDiagnosticTrace())
                 .minimalValueChange(defaults.minimalValueChange())
                 .pauseOnStarving(defaults.pauseOnStarving())
                 .sendMessageEveryMs(defaults.sendMessageEveryMs())
@@ -570,14 +733,149 @@ public class SettingsPanel extends JPanel
         return page;
     }
 
+    /** The log interval and the trace are only useful (and only shown) while the device position is logged. */
+    private void updateDiagnosticsVisibility()
+    {
+        boolean visible = logDevicePosition.isSelected();
+        boolean changed = setRowVisible(deviceLogIntervalRow, deviceLogIntervalSpacer, visible);
+        changed |= setRowVisible(diagnosticTraceRow, diagnosticTraceSpacer, visible);
+        if (changed && smoothedSection.getParent() != null)
+        {
+            smoothedSection.getParent().revalidate();
+            smoothedSection.getParent().repaint();
+        }
+    }
+
+    private static boolean setRowVisible(JComponent row, JComponent spacer, boolean visible)
+    {
+        boolean changed = false;
+        if (row != null && row.isVisible() != visible)
+        {
+            row.setVisible(visible);
+            changed = true;
+        }
+        if (spacer != null && spacer.isVisible() != visible)
+        {
+            spacer.setVisible(visible);
+            changed = true;
+        }
+        return changed;
+    }
+
+    /** All sliders whose final value is logged when the user releases them. */
+    private List<ModernSlider> sliders()
+    {
+        return List.of(strokeRange, fullyPenetratedAt, speedChangeThreshold, speedStopThreshold, divergenceThreshold,
+                speedMeasureWindow, minSliderSpeed, maxSliderSpeed, reversalMinDistance, deviceLogInterval,
+                minimalValueChange, sendMessageEvery);
+    }
+
+    private void installSliderCommitListeners()
+    {
+        for (ModernSlider slider : sliders())
+        {
+            slider.addCommitListener(this::commitSliderChange);
+        }
+    }
+
+    /** Loads the newest profile and shows its values in the speed fields while the measured limits are used. */
+    public void refreshDeviceProfile()
+    {
+        deviceProfile = DeviceProfile.loadLatest("").orElse(null);
+        updateProfileDisplay();
+    }
+
+    /**
+     * Shows the profile values in the two speed fields while "Use calibrated device limits" is on. The values are
+     * display-only; the manual values stay in the settings and are restored when the toggle is turned off.
+     */
+    private void updateProfileDisplay()
+    {
+        boolean override = useDeviceProfile.isSelected() && deviceProfile != null;
+        boolean wasUpdating = updating;
+        updating = true;
+        try
+        {
+            ConfigProperties defaults = ConfigProperties.defaults();
+            if (override)
+            {
+                minSliderSpeed.setValue(Math.clamp((int) Math.round(deviceProfile.plannedMinMmPerSecond()),
+                        minSliderSpeed.getMinimumValue(), minSliderSpeed.getMaximumValue()));
+                maxSliderSpeed.setValue(Math.clamp((int) Math.round(deviceProfile.plannedMaxMmPerSecond()),
+                        maxSliderSpeed.getMinimumValue(), maxSliderSpeed.getMaximumValue()));
+            }
+            else
+            {
+                minSliderSpeed.setValue(orDefault(config.hdspMinSliderSpeed(), defaults.hdspMinSliderSpeed()));
+                maxSliderSpeed.setValue(orDefault(config.hdspMaxSliderSpeed(), defaults.hdspMaxSliderSpeed()));
+            }
+        }
+        finally
+        {
+            updating = wasUpdating;
+        }
+        updateProfileControls();
+    }
+
+    /** The two speed values are manual only when there is no measured profile to show. */
+    private void updateProfileControls()
+    {
+        boolean manual = !useDeviceProfile.isSelected() || deviceProfile == null;
+        minSliderSpeed.setEnabled(manual);
+        maxSliderSpeed.setEnabled(manual);
+    }
+
+    /** The calibration is only offered for Smoothed mode with the measured limits enabled. */
+    private void updateCalibrateVisibility()
+    {
+        if (calibrateButton == null)
+        {
+            return;
+        }
+        boolean visible = config.processingAlgorithm() == ParameterProcessorType.HDSP_SMOOTHED
+                && config.hdspUseDeviceProfile();
+        boolean direct = config.connection() == ConnectionType.DIRECT;
+        String tooltip = Theme.tooltip(direct ? CALIBRATION_TOOLTIP : CALIBRATION_INTIFACE_TOOLTIP);
+        calibrateButton.setEnabled(direct);
+        calibrateButton.setToolTipText(tooltip);
+        applyTooltip(calibrateButtonRow, tooltip);
+        boolean changed = setRowVisible(calibrateButtonRow, calibrateButtonSpacer, visible);
+        if (changed && smoothedSection.getParent() != null)
+        {
+            smoothedSection.getParent().revalidate();
+            smoothedSection.getParent().repaint();
+        }
+    }
+
+    private void confirmCalibration()
+    {
+        if (config.connection() != ConnectionType.DIRECT)
+        {
+            return;
+        }
+        boolean confirmed = ConfirmDialog.show(this, "Step-response calibration", "Run the calibration?",
+                "The device will make a series of known moves while the app measures its response.\n"
+                        + "Keep the device clear; this takes about four minutes and stops the running session"
+                        + " temporarily.\n"
+                        + "The step-response CSV is written to logs/diagnostics/ and the device profile to profiles/.",
+                "Start calibration");
+        if (confirmed && onCalibrate != null)
+        {
+            onCalibrate.run();
+        }
+    }
+
     private JComponent restoreDefaultsButton(java.util.function.Function<ConfigProperties, ConfigProperties> reset)
     {
         var button = new ModernButton("Restore defaults", ModernButton.Style.GHOST);
         button.addActionListener(e ->
         {
+            ConfigProperties before = config;
+            log.info("Restoring default settings");
             ConfigProperties restored = reset.apply(ConfigProperties.defaults());
             setConfig(restored);
             changeListener.accept(restored);
+            logSettingChanges(before, restored, "Restore defaults changed");
         });
         var holder = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
         holder.setOpaque(false);

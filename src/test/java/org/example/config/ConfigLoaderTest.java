@@ -266,6 +266,32 @@ class ConfigLoaderTest
     }
 
     @Test
+    void loadsDiagnosticSettingsAndBoundsTheDeviceLogInterval() throws IOException
+    {
+        var config = loadConfig("""
+                hdspDevicePositionLogIntervalMs=50
+                hdspDiagnosticTrace=true
+                """);
+
+        assertThat(config.hdspDevicePositionLogIntervalMs()).isEqualTo(50);
+        assertThat(config.hdspDiagnosticTrace()).isTrue();
+        assertThat(loadConfig("spsType=PENETRATOR").hdspDevicePositionLogIntervalMs()).isEqualTo(200);
+        assertThat(loadConfig("spsType=PENETRATOR").hdspDiagnosticTrace()).isFalse();
+        // Each read is a Bluetooth round trip: too short an interval falls back to the default
+        assertThat(loadConfig("hdspDevicePositionLogIntervalMs=5").hdspDevicePositionLogIntervalMs()).isEqualTo(200);
+        assertThat(loadConfig("hdspDevicePositionLogIntervalMs=5000").hdspDevicePositionLogIntervalMs()).isEqualTo(200);
+        assertThat(loadConfig("hdspMaxSliderSpeed=350").hdspMaxSliderSpeed()).isEqualTo(350);
+        assertThat(loadConfig("spsType=PENETRATOR").hdspMaxSliderSpeed()).isZero();
+        assertThat(loadConfig("hdspMaxSliderSpeed=5000").hdspMaxSliderSpeed()).isZero();
+        assertThat(loadConfig("hdspUseDeviceProfile=false").hdspUseDeviceProfile()).isFalse();
+        assertThat(loadConfig("spsType=PENETRATOR").hdspUseDeviceProfile()).isTrue();
+        assertThat(loadConfig("pauseOnStarving=false").pauseOnStarving()).isFalse();
+        assertThat(loadConfig("spsType=PENETRATOR").pauseOnStarving()).isTrue();
+        assertThat(loadConfig("spsType=PENETRATOR").hdspSpeedChangeThresholdPercent()).isEqualTo(15);
+        assertThat(loadConfig("hdspSpeedChangeThresholdPercent=25").hdspSpeedChangeThresholdPercent()).isEqualTo(25);
+    }
+
+    @Test
     void createsTheFileWithTheDefaultsWhenItIsMissing() throws IOException
     {
         Path directory = Files.createTempDirectory("config");
@@ -302,8 +328,12 @@ class ConfigLoaderTest
                 .hdspDivergenceThresholdPercent(25)
                 .hdspSpeedMeasureWindowMs(120)
                 .hdspMinSliderSpeed(0)
+                .hdspMaxSliderSpeed(350)
+                .hdspUseDeviceProfile(false)
                 .hdspReversalMinDistancePercent(2.5f)
                 .hdspLogDevicePosition(true)
+                .hdspDevicePositionLogIntervalMs(50)
+                .hdspDiagnosticTrace(true)
                 .logLevel("DEBUG")
                 .build();
         Path configPath = Files.createTempFile("app", ".properties");

@@ -7,6 +7,8 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Slider with a slim rounded track and round thumbs. In range mode it has two thumbs (a lower and an upper value)
@@ -31,6 +33,7 @@ public class ModernSlider extends JComponent
     private int high;
     private boolean lowActive;
     private boolean dragging;
+    private final List<Runnable> commitListeners = new ArrayList<>();
     private int hoverThumb = -1; // -1 none, 0 low, 1 high
 
     /** Single value slider. */
@@ -63,6 +66,16 @@ public class ModernSlider extends JComponent
     public int getValue()
     {
         return high;
+    }
+
+    public int getMinimumValue()
+    {
+        return min;
+    }
+
+    public int getMaximumValue()
+    {
+        return max;
     }
 
     public int getLowValue()
@@ -110,6 +123,29 @@ public class ModernSlider extends JComponent
     public void addChangeListener(ChangeListener listener)
     {
         listenerList.add(ChangeListener.class, listener);
+    }
+
+    /**
+     * Adds a listener that is called when the user finishes changing the value: on mouse release after a drag, or
+     * after a key press. Programmatic {@link #setValue(int)} does not call it.
+     */
+    public void addCommitListener(Runnable listener)
+    {
+        commitListeners.add(listener);
+    }
+
+    /** @return true while the user holds the mouse button on this slider */
+    public boolean isDragging()
+    {
+        return dragging;
+    }
+
+    private void fireCommit()
+    {
+        for (Runnable listener : List.copyOf(commitListeners))
+        {
+            listener.run();
+        }
     }
 
     private void fireStateChanged()
@@ -186,8 +222,13 @@ public class ModernSlider extends JComponent
             @Override
             public void mouseReleased(MouseEvent e)
             {
+                boolean wasDragging = dragging;
                 dragging = false;
                 repaint();
+                if (wasDragging)
+                {
+                    fireCommit();
+                }
             }
 
             @Override
@@ -233,6 +274,7 @@ public class ModernSlider extends JComponent
                 if (target != null)
                 {
                     moveActiveThumbTo(target);
+                    fireCommit();
                     e.consume();
                 }
             }
@@ -249,6 +291,11 @@ public class ModernSlider extends JComponent
             public void focusLost(FocusEvent e)
             {
                 repaint();
+                if (dragging)
+                {
+                    dragging = false;
+                    fireCommit();
+                }
             }
         });
     }

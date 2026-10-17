@@ -51,8 +51,16 @@ public record ConfigProperties(
         Integer hdspDivergenceThresholdPercent,
         Integer hdspSpeedMeasureWindowMs,
         Integer hdspMinSliderSpeed,
+        // Highest speed the device can move (mm/s), 0 leaves it unlimited
+        Integer hdspMaxSliderSpeed,
+        // Uses the limits measured by the newest device calibration instead of the two settings above
+        boolean hdspUseDeviceProfile,
         Float hdspReversalMinDistancePercent,
         boolean hdspLogDevicePosition,
+        // How often the device position is read while hdspLogDevicePosition is on (20-2000ms)
+        Integer hdspDevicePositionLogIntervalMs,
+        // Writes a structured JSONL trace of the values, commands and device samples for diagnostics
+        boolean hdspDiagnosticTrace,
 
         // Not editable in the GUI, kept so that a log level set in app.properties survives saving
         String logLevel
@@ -88,14 +96,18 @@ public record ConfigProperties(
                 .sendMessageEveryMs(0)
                 .checkForUpdates(true)
                 .minimalValueChange(DEFAULT_MINIMAL_VALUE_CHANGE)
-                .pauseOnStarving(false)
+                .pauseOnStarving(true)
                 .hdspSpeedChangeThresholdPercent(HdspSmoothedParameterProcessor.DEFAULT_SPEED_CHANGE_THRESHOLD_PERCENT)
                 .hdspSpeedStopThresholdPercent(HdspSmoothedParameterProcessor.DEFAULT_SPEED_STOP_THRESHOLD_PERCENT)
                 .hdspDivergenceThresholdPercent(HdspSmoothedParameterProcessor.DEFAULT_DIVERGENCE_THRESHOLD_PERCENT)
                 .hdspSpeedMeasureWindowMs(HdspSmoothedParameterProcessor.DEFAULT_SPEED_MEASURE_WINDOW_MS)
                 .hdspMinSliderSpeed(HdspSmoothedParameterProcessor.DEFAULT_MIN_SLIDER_SPEED_MM_PER_SECOND)
+                .hdspMaxSliderSpeed(0)
+                .hdspUseDeviceProfile(true)
                 .hdspReversalMinDistancePercent(HdspSmoothedParameterProcessor.DEFAULT_REVERSAL_MIN_DISTANCE_PERCENT)
                 .hdspLogDevicePosition(false)
+                .hdspDevicePositionLogIntervalMs(HdspSmoothedParameterProcessor.DEFAULT_DEVICE_POSITION_LOG_INTERVAL_MS)
+                .hdspDiagnosticTrace(false)
                 .logLevel("INFO")
                 .build();
     }

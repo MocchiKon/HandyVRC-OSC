@@ -144,4 +144,15 @@ public class HandyBleAdapter implements RpcTransport
     {
         return handy != null && handy.isConnected();
     }
+
+    /** @return the Bluetooth address of the connected device, or its advertised name when the address is empty */
+    public String getIdentifier()
+    {
+        if (handy == null)
+        {
+            return "";
+        }
+        String address = handy.getAddress() == null ? "" : handy.getAddress().toString();
+        return address.isBlank() ? handy.getIdentifier() : address;
+    }
 }
