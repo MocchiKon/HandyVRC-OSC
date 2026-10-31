@@ -97,7 +97,7 @@ class HdspParameterProcessorTest
         processor.actOnValueChange(0.5f); // Position 50
         processor.trySendingMessage(0);
 
-        assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
+        assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 50, false));
     }
 
     @Test
@@ -112,7 +112,7 @@ class HdspParameterProcessorTest
         processor.trySendingMessage(0); // Sends the movement
         processor.trySendingMessage(0); // Would stop it immediately if the activity time was not refreshed
 
-        assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 20, false));
+        assertThat(client.hdspCalls).containsExactly(new HdspCall(xp(50), 50, false));
     }
 
     @Test
