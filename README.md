@@ -28,7 +28,7 @@ TheHandy stroker and VRChat integration via OSC and Bluetooth (or through [Intif
 
 ## Connecting through Intiface
 
-**Important:** Other strokers that Intiface supports (or any device that can be moved to a position) **might work**,
+:warning:**Important:** Other strokers that Intiface supports (or any device that can be moved to a position) **might work**,
 but they are **not tested**. If you plan to use Intiface with this app then try switching from Smoothed to Direct movement mode as it *might* work better in this case.
 
 By default (**Connection: Direct**, recommended) the app connects to the Handy over Bluetooth by itself. If you'd rather
