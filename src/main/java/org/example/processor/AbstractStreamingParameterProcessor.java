@@ -19,10 +19,10 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
 {
     protected final List<MovementPoint> points = Collections.synchronizedList(new ArrayList<>(20));
     protected final HandyClient handyClient;
+    protected final ConfigProperties config;
 
     protected long initTimeMs;
     protected int timeOffsetMs;
-    protected int timeBetweenMessages;
     /** Time (app clock) of the last point activity: a point was generated or a movement command was sent. */
     protected volatile long lastPointActivityMs;
 
@@ -49,8 +49,8 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     protected AbstractStreamingParameterProcessor(HandyClient handyClient, ConfigProperties config)
     {
         this.handyClient = handyClient;
+        this.config = config;
         this.initTimeMs = System.currentTimeMillis();
-        this.timeBetweenMessages = config.sendMessageEveryMs();
         this.minimalValueChange = config.minimalValueChange();
         this.spsType = config.spsType();
         this.fullyPenetratedAtValue = resolveFullyPenetratedAtValue(config);
@@ -283,12 +283,12 @@ public abstract class AbstractStreamingParameterProcessor implements ParameterPr
     }
 
     /**
-     * Minimum time between two messages sent to the device. Defaults to 'sendMessageEveryMs',
-     * subclasses can override it to enforce a larger interval.
+     * Minimum time between two messages sent to the device. The base implementation returns zero (no minimum);
+     * subclasses override it to enforce their own mode-specific default and minimum.
      */
     protected long getSendIntervalMs()
     {
-        return timeBetweenMessages;
+        return 0;
     }
 
     /**

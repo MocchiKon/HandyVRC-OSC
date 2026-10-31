@@ -37,8 +37,10 @@ public record ConfigProperties(
         int listenOnPort,
         boolean useOscQuery,
 
-        // Advanced (all modes)
-        int sendMessageEveryMs,
+        // Advanced (DIRECT only)
+        int sendMessageEveryMsDirect,
+        // Advanced (SMOOTHED only)
+        int sendMessageEveryMsSmoothed,
         boolean checkForUpdates,
 
         // Advanced (DIRECT only)
@@ -93,7 +95,8 @@ public record ConfigProperties(
                 .reverseMovement(false)
                 .listenOnPort(DEFAULT_LISTEN_ON_PORT)
                 .useOscQuery(true)
-                .sendMessageEveryMs(0)
+                .sendMessageEveryMsDirect(50)   // Direct mode: default 50 ms, minimum 20 ms
+                .sendMessageEveryMsSmoothed(20) // Smoothed mode: default 20 ms, minimum 20 ms
                 .checkForUpdates(true)
                 .minimalValueChange(DEFAULT_MINIMAL_VALUE_CHANGE)
                 .pauseOnStarving(true)

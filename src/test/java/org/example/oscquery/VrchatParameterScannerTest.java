@@ -126,7 +126,7 @@ class VrchatParameterScannerTest
                 .avatarParameter("/avatar/parameters/OGB/Orf/*/PenOthersNewRoot")
                 .spsType(SpsType.ORIFICE)
                 .processingAlgorithm(ParameterProcessorType.HDSP)
-                .sendMessageEveryMs(0)
+                .sendMessageEveryMsDirect(0)
                 .build();
     }
 }

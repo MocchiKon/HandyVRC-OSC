@@ -108,7 +108,8 @@ public class ConfigLoader
                 .reverseMovement(getBoolean(properties, "reverseMovement", defaults.reverseMovement()))
                 .listenOnPort(getInt(properties, "listenOnPort", defaults.listenOnPort(), 1, 65535))
                 .useOscQuery(getBoolean(properties, "useOscQuery", defaults.useOscQuery()))
-                .sendMessageEveryMs(getInt(properties, "sendMessageEveryMs", defaults.sendMessageEveryMs(), 0, 10_000))
+                .sendMessageEveryMsDirect(getInt(properties, "sendMessageEveryMsDirect", defaults.sendMessageEveryMsDirect(), 20, 10_000))
+                .sendMessageEveryMsSmoothed(getInt(properties, "sendMessageEveryMsSmoothed", defaults.sendMessageEveryMsSmoothed(), 20, 10_000))
                 .checkForUpdates(getBoolean(properties, "checkForUpdates", defaults.checkForUpdates()))
                 .minimalValueChange(getInt(properties, "minimalValueChange", defaults.minimalValueChange(), 0, 100))
                 .pauseOnStarving(getBoolean(properties, "pauseOnStarving", defaults.pauseOnStarving()))
@@ -208,7 +209,8 @@ public class ConfigLoader
         entry(out, "useOscQuery", config.useOscQuery(),
                 "Lets VRChat know where to send OSC messages, so that other OSC apps cannot block the port.");
         section(out, "Advanced");
-        entry(out, "sendMessageEveryMs", config.sendMessageEveryMs(), "Minimum time (ms) between two commands sent to the device.");
+        entry(out, "sendMessageEveryMsDirect", config.sendMessageEveryMsDirect(), "Minimum time (ms) between two commands sent to the device (Direct mode).");
+        entry(out, "sendMessageEveryMsSmoothed", config.sendMessageEveryMsSmoothed(), "Minimum time (ms) between two commands sent to the device (Smoothed mode).");
         entry(out, "checkForUpdates", config.checkForUpdates(), "Checks GitHub for a newer version on startup.");
         entry(out, "minimalValueChange", config.minimalValueChange(), "(Direct only) Smallest position change (in %) that is sent to the device.");
         entry(out, "pauseOnStarving", config.pauseOnStarving(), "(Direct only, on by default) Stops the device at every position instead of moving on.");

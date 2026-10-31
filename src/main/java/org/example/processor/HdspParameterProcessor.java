@@ -29,8 +29,6 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
      * enforced to avoid flooding the BLE connection. 20ms keeps the movement smooth without saturating BLE.
      */
     public static final int HDSP_MIN_SEND_INTERVAL_MS = 20;
-    /** Default send interval (ms) for Direct mode when the user has not configured a custom value. */
-    private static final int HDSP_DEFAULT_SEND_INTERVAL_MS = 50;
     /**
      * Upper bound for a single move. A longer gap between updates is handled by the idle stop and by the
      * "point after stopping" rule, so a move should never need to be longer than the idle timeout.
@@ -74,12 +72,8 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
     @Override
     protected long getSendIntervalMs()
     {
-        long configured = super.getSendIntervalMs(); // config.sendMessageEveryMs(); 0 when not configured
-        if (configured == 0)
-        {
-            return HDSP_DEFAULT_SEND_INTERVAL_MS; // default 50 ms for Direct mode
-        }
-        return Math.max(configured, HDSP_MIN_SEND_INTERVAL_MS); // honor configured value, never below 20 ms
+        long configured = config.sendMessageEveryMsDirect(); // defaults to 50 ms for Direct mode
+        return Math.max(configured, HDSP_MIN_SEND_INTERVAL_MS); // never below 20 ms
     }
 
     @Override

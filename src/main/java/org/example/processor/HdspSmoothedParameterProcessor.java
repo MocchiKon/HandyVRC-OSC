@@ -787,7 +787,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     @Override
     protected long getSendIntervalMs()
     {
-        return Math.max(super.getSendIntervalMs(), HDSP_MIN_SEND_INTERVAL_MS);
+        return Math.max(config.sendMessageEveryMsSmoothed(), HDSP_MIN_SEND_INTERVAL_MS);
     }
 
     @Override

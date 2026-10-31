@@ -156,7 +156,8 @@ class ConfigLoaderTest
                 spsType=SOMETHING
                 listenOnPort=abc
                 useOscQuery=maybe
-                sendMessageEveryMs=-5
+                sendMessageEveryMsDirect=-5
+                sendMessageEveryMsSmoothed=-5
                 hdspSpeedChangeThresholdPercent=0
                 """);
         var defaults = ConfigProperties.defaults();
@@ -164,7 +165,10 @@ class ConfigLoaderTest
         assertThat(config.spsType()).isEqualTo(defaults.spsType());
         assertThat(config.listenOnPort()).isEqualTo(defaults.listenOnPort());
         assertThat(config.useOscQuery()).isEqualTo(defaults.useOscQuery());
-        assertThat(config.sendMessageEveryMs()).isEqualTo(defaults.sendMessageEveryMs());
+        assertThat(config.sendMessageEveryMsDirect()).isEqualTo(defaults.sendMessageEveryMsDirect());
+        assertThat(config.sendMessageEveryMsSmoothed()).isEqualTo(defaults.sendMessageEveryMsSmoothed());
+        assertThat(defaults.sendMessageEveryMsDirect()).isEqualTo(50);
+        assertThat(defaults.sendMessageEveryMsSmoothed()).isEqualTo(20);
         assertThat(config.hdspSpeedChangeThresholdPercent()).isEqualTo(defaults.hdspSpeedChangeThresholdPercent());
     }
 
@@ -319,7 +323,7 @@ class ConfigLoaderTest
                 .reverseMovement(true)
                 .listenOnPort(9123)
                 .useOscQuery(false)
-                .sendMessageEveryMs(40)
+                .sendMessageEveryMsDirect(40)
                 .checkForUpdates(false)
                 .minimalValueChange(5)
                 .pauseOnStarving(true)

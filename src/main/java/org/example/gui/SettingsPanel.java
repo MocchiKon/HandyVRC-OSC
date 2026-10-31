@@ -103,7 +103,8 @@ public class SettingsPanel extends JPanel
     private JComponent calibrateButtonSpacer;
     private final ModernSlider minimalValueChange = new ModernSlider(0, 20, 1, 3);
     private final ToggleSwitch pauseOnStarving = new ToggleSwitch(true);
-    private final ModernSlider sendMessageEvery = new ModernSlider(0, 200, 5, 0);
+    private final ModernSlider sendMessageEveryDirect = new ModernSlider(20, 200, 5, 50);
+    private final ModernSlider sendMessageEverySmoothed = new ModernSlider(20, 200, 5, 20);
     private final ToggleSwitch checkForUpdates = new ToggleSwitch(true);
     private final SegmentedControl<String> logLevel = new SegmentedControl<>(List.of(
             new SegmentedControl.Option<>("TRACE", "Trace",
@@ -238,7 +239,8 @@ public class SettingsPanel extends JPanel
             diagnosticTrace.setSelected(newConfig.hdspDiagnosticTrace());
             minimalValueChange.setValue(newConfig.minimalValueChange());
             pauseOnStarving.setSelected(newConfig.pauseOnStarving());
-            sendMessageEvery.setValue(newConfig.sendMessageEveryMs());
+            sendMessageEveryDirect.setValue(newConfig.sendMessageEveryMsDirect());
+            sendMessageEverySmoothed.setValue(newConfig.sendMessageEveryMsSmoothed());
             checkForUpdates.setSelected(newConfig.checkForUpdates());
             String level = newConfig.logLevel() == null ? "INFO" : newConfig.logLevel().toUpperCase(java.util.Locale.ROOT);
             logLevel.setSelected(LOG_LEVELS.contains(level) ? level : "INFO");
@@ -462,7 +464,8 @@ public class SettingsPanel extends JPanel
         diagnosticTrace.addChangeListener(e -> update(b -> b.hdspDiagnosticTrace(diagnosticTrace.isSelected())));
         minimalValueChange.addChangeListener(e -> update(b -> b.minimalValueChange(minimalValueChange.getValue())));
         pauseOnStarving.addChangeListener(e -> update(b -> b.pauseOnStarving(pauseOnStarving.isSelected())));
-        sendMessageEvery.addChangeListener(e -> update(b -> b.sendMessageEveryMs(sendMessageEvery.getValue())));
+        sendMessageEveryDirect.addChangeListener(e -> update(b -> b.sendMessageEveryMsDirect(sendMessageEveryDirect.getValue())));
+        sendMessageEverySmoothed.addChangeListener(e -> update(b -> b.sendMessageEveryMsSmoothed(sendMessageEverySmoothed.getValue())));
         checkForUpdates.addChangeListener(e -> update(b -> b.checkForUpdates(checkForUpdates.isSelected())));
         logLevel.setSelectionListener(value -> update(b -> b.logLevel(value)));
     }
@@ -684,6 +687,10 @@ public class SettingsPanel extends JPanel
                         + " while this is on.",
                 diagnosticTrace);
         diagnosticTraceSpacer = addRow(smoothedSection, diagnosticTraceRow);
+        addRow(smoothedSection, sliderRow("Send interval",
+                "Minimum time between two speed/direction corrections sent to the device. At least 20 ms are always kept to not flood"
+                        + " the device connection. Stops are always sent right away.",
+                sendMessageEverySmoothed, value -> value <= 20 ? "20 ms (minimum)" : value + " ms"));
         page.add(smoothedSection);
 
         addRow(directSection, sliderRow("Minimal value change",
@@ -694,15 +701,14 @@ public class SettingsPanel extends JPanel
                 "Direct mode only. The device stops when it reaches a position, instead of carrying on while it waits"
                         + " for the next one. Avoids overshooting, but the movement can feel choppier.",
                 pauseOnStarving));
+        addRow(directSection, sliderRow("Send interval",
+                "Minimum time between two commands sent to the device. At least 20 ms are always kept to not flood"
+                        + " the device connection.",
+                sendMessageEveryDirect, value -> value <= 20 ? "20 ms (minimum)" : value + " ms"));
         page.add(directSection);
         page.add(Box.createVerticalStrut(12));
 
         var general = section("General");
-        addRow(general, sliderRow("Send interval",
-                "Minimum time between two commands sent to the device. At least 20 ms are always kept to not flood"
-                        + " the device connection. In Smoothed mode this only spaces out speed corrections, stops"
-                        + " are always sent right away.",
-                sendMessageEvery, value -> value <= 20 ? "20 ms (minimum)" : value + " ms"));
         addRow(general, toggleRow("Check for updates", null,
                 "Checks GitHub on startup whether a newer version was released and lets you know. The check runs in"
                         + " the background and never blocks the app.",
@@ -726,7 +732,8 @@ public class SettingsPanel extends JPanel
                 .hdspDiagnosticTrace(defaults.hdspDiagnosticTrace())
                 .minimalValueChange(defaults.minimalValueChange())
                 .pauseOnStarving(defaults.pauseOnStarving())
-                .sendMessageEveryMs(defaults.sendMessageEveryMs())
+                .sendMessageEveryMsDirect(defaults.sendMessageEveryMsDirect())
+                .sendMessageEveryMsSmoothed(defaults.sendMessageEveryMsSmoothed())
                 .checkForUpdates(defaults.checkForUpdates())
                 .logLevel(defaults.logLevel())
                 .build()));
@@ -767,7 +774,7 @@ public class SettingsPanel extends JPanel
     {
         return List.of(strokeRange, fullyPenetratedAt, speedChangeThreshold, speedStopThreshold, divergenceThreshold,
                 speedMeasureWindow, minSliderSpeed, maxSliderSpeed, reversalMinDistance, deviceLogInterval,
-                minimalValueChange, sendMessageEvery);
+                minimalValueChange, sendMessageEveryDirect, sendMessageEverySmoothed);
     }
 
     private void installSliderCommitListeners()

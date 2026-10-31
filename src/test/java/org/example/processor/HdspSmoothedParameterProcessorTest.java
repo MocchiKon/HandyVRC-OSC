@@ -503,7 +503,7 @@ class HdspSmoothedParameterProcessorTest
         // sendMessageEveryMs spaces out the corrections of a movement, but a stop that waits for it lets the
         // slider run on past the user
         var harness = new Harness(ConfigProperties.builder().spsType(SpsType.PENETRATOR).minimalValueChange(0)
-                .hdspMinSliderSpeed(0).sendMessageEveryMs(50).build());
+                .hdspMinSliderSpeed(0).sendMessageEveryMsSmoothed(50).build());
         harness.runVrchat(467, t -> 0.1 + 1.0 * t / 1000.0, 0.01);
         long lastValueAt = harness.virtualTimeMs();
         harness.idle(500);
