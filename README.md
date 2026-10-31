@@ -1,6 +1,6 @@
 # HandyVRC-OSC
 
-TheHandy stroker and VRChat integration via OSC and Bluetooth (or through [Intiface Central](https://intiface.com/central/)).
+The Handy stroker and VRChat integration via OSC and Bluetooth (or through [Intiface Central](https://intiface.com/central/)).
 
 [Download latest version](https://github.com/MocchiKon/HandyVRC-OSC/releases/latest)
 
