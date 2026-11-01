@@ -31,7 +31,7 @@ See it in action: [https://x.com/MocchiKon/status/2116869874005717483](https://x
 ## Connecting through Intiface
 
 :warning:**Important:** Other strokers that Intiface supports (or any device that can be moved to a position) **might work**,
-but they are **not tested**. If you plan to use Intiface with this app then try switching from Smoothed to Direct movement mode as it *might* work better in this case.
+but they are **not tested**.
 
 By default (**Connection: Direct**, recommended) the app connects to the Handy over Bluetooth by itself. If you'd rather
 let [Intiface Central](https://intiface.com/central/) handle the device:
@@ -49,7 +49,7 @@ the slider position) only work with it.
 * Use **Direct** connection mode instead of Intiface if you can (TheHandy only).
 * Use the **full stroke range** if you can. A very short range makes slow movements hard for the Handy.
 * Perform movements towards the base, positioning during act is very important due to how SPS works.
-* If **Smoothed** mode does not work well for you then try **Direct**.
+* If **Smoothed** movement mode does not work well for you then try **Direct**.
 * You can turn your Handy into thrusting machine, in this case you will want to  enable "Reverse movement" and use SPS type Orifice.
 
 ## Something doesn't work?
