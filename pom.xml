@@ -6,7 +6,7 @@
 
     <groupId>org.example</groupId>
     <artifactId>HandyVRC-OSC</artifactId>
-    <version>1.2</version>
+    <version>1.2.1-SNAPSHOT</version>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -196,6 +196,10 @@
                                 <path>jre</path>
                                 <requires64Bit>true</requires64Bit>
                                 <minVersion>21</minVersion>
+                                <!-- Lets the app log that it runs from the Windows release; the all-platforms jar has no such option -->
+                                <opts>
+                                    <opt>-Dhandyvrc.launchMode=windows-exe</opt>
+                                </opts>
                             </jre>
                             <versionInfo>
                                 <fileVersion>${winVersion}</fileVersion>

@@ -198,9 +198,16 @@ class TestModeWindow
             return;
         }
         String message = status.message();
-        statusText.setText(status.state() == AppController.State.RUNNING && (message == null || message.isBlank())
-                ? "Running: your Handy follows the depth." : message);
-        statusText.setForeground(status.state() == AppController.State.ERROR ? Theme.ERROR : Theme.TEXT_SECONDARY);
+        String text = status.state() == AppController.State.RUNNING && (message == null || message.isBlank())
+                ? "Running: your Handy follows the depth." : message == null ? "" : message;
+        String warning = status.warning();
+        if (warning != null && !warning.isBlank())
+        {
+            text = text.isBlank() ? warning : text + "\n" + warning;
+        }
+        statusText.setText(text);
+        statusText.setForeground(warning != null ? Theme.WARNING
+                : status.state() == AppController.State.ERROR ? Theme.ERROR : Theme.TEXT_SECONDARY);
         boolean failed = status.state() == AppController.State.ERROR;
         stopButton.setText(failed ? "Retry" : "Stop test");
         stopButton.setStyle(failed ? ModernButton.Style.PRIMARY : ModernButton.Style.SECONDARY);

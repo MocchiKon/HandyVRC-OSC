@@ -12,6 +12,8 @@ public class StatusPill extends JComponent
 {
     private AppController.State state = AppController.State.STOPPED;
     private boolean testMode;
+    /** True while the app runs but the user should know about a problem (the device did not answer). */
+    private boolean warning;
     private float pulse;
     private final Timer pulseTimer;
 
@@ -26,10 +28,11 @@ public class StatusPill extends JComponent
         });
     }
 
-    public void setState(AppController.State state, boolean testMode)
+    public void setState(AppController.State state, boolean testMode, boolean warning)
     {
         this.state = state;
         this.testMode = testMode;
+        this.warning = warning;
         if (state == AppController.State.CONNECTING || state == AppController.State.RUNNING
                 || state == AppController.State.STOPPING)
         {
@@ -61,7 +64,7 @@ public class StatusPill extends JComponent
         {
             case STOPPED -> Theme.TEXT_MUTED;
             case CONNECTING, STOPPING -> Theme.ACCENT_LIGHT;
-            case RUNNING -> Theme.ACCENT;
+            case RUNNING -> warning ? Theme.WARNING : Theme.ACCENT;
             case ERROR -> Theme.ERROR;
         };
     }
@@ -84,11 +87,13 @@ public class StatusPill extends JComponent
     {
         Graphics2D g = Theme.smooth(graphics);
         int height = getHeight();
+        boolean running = state == AppController.State.RUNNING;
+        Color runningColor = warning ? Theme.WARNING : Theme.ACCENT;
         Color background = state == AppController.State.ERROR ? Theme.ERROR_BACKGROUND
-                : state == AppController.State.RUNNING ? Theme.withAlpha(Theme.ACCENT, 45) : Theme.SURFACE;
+                : running ? Theme.withAlpha(runningColor, 45) : Theme.SURFACE;
         g.setColor(background);
         g.fill(new RoundRectangle2D.Float(0, 0, getWidth(), height, height, height));
-        g.setColor(state == AppController.State.RUNNING ? Theme.withAlpha(Theme.ACCENT, 120) : Theme.BORDER);
+        g.setColor(running ? Theme.withAlpha(runningColor, 120) : Theme.BORDER);
         g.draw(new RoundRectangle2D.Float(0.5f, 0.5f, getWidth() - 1, height - 1, height, height));
 
         float dot = 8;

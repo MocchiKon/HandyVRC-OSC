@@ -409,7 +409,7 @@ public class MainWindow
         String error = config.validate();
         if (error != null)
         {
-            showMessage(error, true);
+            showMessage(error, true, null);
             return;
         }
         appliedConfig = config;
@@ -453,7 +453,7 @@ public class MainWindow
     private void showStatus(AppController.Status newStatus)
     {
         status = newStatus;
-        statusPill.setState(newStatus.state(), newStatus.testMode());
+        statusPill.setState(newStatus.state(), newStatus.testMode(), newStatus.warning() != null);
         if (testWindow != null)
         {
             testWindow.showStatus(newStatus);
@@ -465,7 +465,7 @@ public class MainWindow
         testModeButton.setEnabled(newStatus.state() != AppController.State.CONNECTING
                 && newStatus.state() != AppController.State.STOPPING);
         gauge.setActive(newStatus.state() == AppController.State.RUNNING);
-        showMessage(newStatus.message(), newStatus.state() == AppController.State.ERROR);
+        showMessage(newStatus.message(), newStatus.state() == AppController.State.ERROR, newStatus.warning());
         if (newStatus.message() != null && newStatus.message().startsWith("Calibration saved to"))
         {
             settings.refreshDeviceProfile();
@@ -505,11 +505,21 @@ public class MainWindow
         updatePendingChanges();
     }
 
-    private void showMessage(String message, boolean error)
+    /**
+     * Shows the status message and, below it, a warning the app keeps running with (for example a device that is
+     * connected but does not answer). The warning gets its own line in the warning color, so that the normal status
+     * (the OSC port, the test mode hint) stays readable.
+     */
+    private void showMessage(String message, boolean error, String warning)
     {
-        statusMessage.setForeground(error ? Theme.ERROR : Theme.TEXT_SECONDARY);
-        statusMessage.setText(message);
-        statusMessage.setVisible(message != null && !message.isEmpty());
+        String text = message == null ? "" : message;
+        if (warning != null && !warning.isBlank())
+        {
+            text = text.isBlank() ? warning : text + "\n" + warning;
+        }
+        statusMessage.setForeground(error ? Theme.ERROR : warning != null ? Theme.WARNING : Theme.TEXT_SECONDARY);
+        statusMessage.setText(text);
+        statusMessage.setVisible(!text.isBlank());
     }
 
     private void updatePendingChanges()

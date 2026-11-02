@@ -43,6 +43,8 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
     private boolean pauseOnStarving;
     /** One command is sent per position, so an out of range position would otherwise flood the log. */
     private final RateLimitedLogger positionWarnings = new RateLimitedLogger(log);
+    /** One failed command produces one log line per try, which would flood the log while the device is broken. */
+    private final RateLimitedLogger commandWarnings = new RateLimitedLogger(log);
 
     // Tests only
     HdspParameterProcessor(ConfigProperties config)
@@ -63,9 +65,26 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
 
         if (config.sliderMin() != null || config.sliderMax() != null)
         {
-            handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+            try
+            {
+                handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+            }
+            catch (RuntimeException e)
+            {
+                // A device that does not answer the stroke range request can still be moved: the movement commands
+                // are sent without waiting for a response, so the range it already has is used.
+                log.warn("Could not set the stroke range on the device, using the range it has: {}", e.getMessage());
+            }
         }
-        Optional<SliderSettingsResult> sliderSettings = handyClient.getSliderSettings();
+        Optional<SliderSettingsResult> sliderSettings = Optional.empty();
+        try
+        {
+            sliderSettings = handyClient.getSliderSettings();
+        }
+        catch (RuntimeException e)
+        {
+            log.warn("Could not read the stroke range from the device: {}", e.getMessage());
+        }
         sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
     }
 
@@ -162,7 +181,8 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
             HandyBaseResponseWithError response = handyClient.hdspXpt(normalizedXp, durationMs, stopOnTarget);
             if (response.error() != null)
             {
-                log.error("Error when sending HDSP command to Handy! (reason: {})", response.error().message());
+                commandWarnings.error("Error when sending HDSP command to Handy! (reason: "
+                        + response.error().message() + ")");
             }
             else
             {
@@ -172,7 +192,7 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
         }
         catch (Exception e)
         {
-            log.error("Exception when sending HDSP command: {}", e.getMessage());
+            commandWarnings.error("Exception when sending HDSP command: " + e.getMessage());
         }
     }
 

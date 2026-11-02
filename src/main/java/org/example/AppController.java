@@ -49,6 +49,9 @@ public class AppController implements AutoCloseable
      */
     static final float TEST_PENETRATOR_LENGTH = 0.1f;
 
+    /** How long the second (and last) Bluetooth scan looks for the Handy after the first one found nothing. */
+    private static final long RETRY_SCAN_TIMEOUT_MS = 10_000;
+
     public enum State
     {
         STOPPED, CONNECTING, RUNNING, STOPPING, ERROR
@@ -57,12 +60,18 @@ public class AppController implements AutoCloseable
     /**
      * @param message  what is going on, for the user
      * @param testMode whether the session is (or was being) started in test mode
+     * @param warning  a problem the user should know about while the app keeps running, or null
      */
-    public record Status(State state, String message, boolean testMode)
+    public record Status(State state, String message, boolean testMode, String warning)
     {
         public Status(State state, String message)
         {
-            this(state, message, false);
+            this(state, message, false, null);
+        }
+
+        public Status(State state, String message, boolean testMode)
+        {
+            this(state, message, testMode, null);
         }
     }
 
@@ -81,6 +90,11 @@ public class AppController implements AutoCloseable
     private volatile HandyClient client;
     /** How the connected device was connected, so that a change of the connection settings reconnects it. */
     private DeviceConnection connectedWith;
+    /**
+     * Why the connected device may not move (it connected but did not answer), shown with the running status instead
+     * of refusing to start; null when the device answered.
+     */
+    private String deviceWarning;
     private boolean shutdownHookRegistered;
     private OscEndpoint osc;
     private ParameterProcessor processor;
@@ -317,7 +331,9 @@ public class AppController implements AutoCloseable
         try
         {
             DeviceConnection connection = DeviceConnection.of(config);
-            if (!isDeviceConnected() || !connection.equals(connectedWith))
+            // A connection that just failed the start-up check is replaced as well: pressing Start is what the
+            // user does after power-cycling the Handy, and it has to connect (and check) again to notice.
+            if (!isDeviceConnected() || !connection.equals(connectedWith) || deviceWarning != null)
             {
                 setStatus(State.CONNECTING, connection.type() == ConnectionType.INTIFACE
                         ? "Connecting to Intiface Central at %s...".formatted(connection.intifaceUri())
@@ -339,7 +355,7 @@ public class AppController implements AutoCloseable
                 log.info("Test mode running ({} mode, moving the {})", config.processingAlgorithm().getLabel(),
                         config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice");
                 setStatus(State.RUNNING, "Test mode: move the %s in the Test mode window to move your Handy."
-                        .formatted(config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice"));
+                        .formatted(config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice"), deviceWarning);
                 return;
             }
 
@@ -349,12 +365,20 @@ public class AppController implements AutoCloseable
             startParameterScanner(config);
             processor.run();
             log.info("Running ({} mode, {})", config.processingAlgorithm().getLabel(), config.spsType());
-            setStatus(State.RUNNING, osc.describe());
+            setStatus(State.RUNNING, osc.describe(), deviceWarning);
         }
         catch (Exception e)
         {
             log.error("Could not start", e);
+            // A failure before the processor existed is a failure of the device connection itself (it did not
+            // answer, or preparing it failed). Keep that link around and the next Start would retry on it; drop it
+            // so that pressing Start again reconnects.
+            boolean devicePrepared = processor != null;
             stopSession(true);
+            if (!devicePrepared)
+            {
+                disconnectDevice();
+            }
             setStatus(State.ERROR, "Could not start: " + describe(e));
         }
     }
@@ -421,7 +445,7 @@ public class AppController implements AutoCloseable
         registerShutdownHook();
     }
 
-    private static HandyClient connectBluetooth()
+    private HandyClient connectBluetooth()
     {
         boolean bluetoothEnabled;
         try
@@ -436,10 +460,50 @@ public class AppController implements AutoCloseable
         {
             throw new IllegalStateException("Bluetooth is turned off. Turn it on and press Start again.");
         }
-        var ble = new HandyBleAdapter();
-        ble.connect();
+
+        // The scan is the least reliable step (a device that is not advertising at that moment is simply not seen),
+        // so it gets one more try with a shorter window before the user is told to press Start again.
+        HandyClientBle client = null;
+        RuntimeException lastFailure = new IllegalStateException("Could not connect to the Handy over Bluetooth");
+        for (int attempt = 1; attempt <= 2 && client == null; attempt++)
+        {
+            var ble = new HandyBleAdapter();
+            try
+            {
+                ble.connect(attempt == 1 ? HandyBleAdapter.DEFAULT_SCAN_TIMEOUT_MS : RETRY_SCAN_TIMEOUT_MS);
+                client = new HandyClientBle(ble);
+            }
+            catch (RuntimeException e)
+            {
+                lastFailure = e;
+                log.warn("Bluetooth connection attempt {} failed: {}", attempt, e.getMessage());
+                ble.disconnect();
+                if (attempt == 1)
+                {
+                    setStatus(State.CONNECTING, "Still searching for your Handy over Bluetooth...");
+                }
+            }
+        }
+        if (client == null)
+        {
+            throw lastFailure;
+        }
         log.info("Handy connected via BLE...");
-        return new HandyClientBle(ble);
+
+        // A device that connects but does not answer may still move: the movement commands are sent without waiting
+        // for a response. So the session is not refused, the problem is carried into the running status instead.
+        try
+        {
+            client.verifyResponsive();
+            deviceWarning = null;
+        }
+        catch (RuntimeException e)
+        {
+            log.error("The Handy did not answer the start-up check, continuing anyway: {}", e.getMessage());
+            deviceWarning = "The Handy is connected but does not return responses, so it may not move and slider settings may not apply."
+                    + " Power-cycle it and press Start again.";
+        }
+        return client;
     }
 
     private void disconnectDevice()
@@ -447,6 +511,7 @@ public class AppController implements AutoCloseable
         HandyClient oldClient = client;
         client = null;
         connectedWith = null;
+        deviceWarning = null;
         try
         {
             if (oldClient != null)
@@ -543,7 +608,12 @@ public class AppController implements AutoCloseable
 
     private void setStatus(State state, String message)
     {
-        status = new Status(state, message, testMode);
+        setStatus(state, message, null);
+    }
+
+    private void setStatus(State state, String message, String warning)
+    {
+        status = new Status(state, message, testMode, warning);
         try
         {
             statusListener.accept(status);

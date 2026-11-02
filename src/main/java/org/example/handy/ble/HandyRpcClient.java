@@ -4,6 +4,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import dev.handy.proto.HandyRpc;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,6 +37,7 @@ public class HandyRpcClient implements AutoCloseable
     public static final int NO_COMPLETION_ID = Integer.MAX_VALUE;
     /** How long a single read may block before the reader thread re-checks whether it should stop. */
     private static final long READ_POLL_MS = 250;
+    private static final HexFormat HEX = HexFormat.of();
 
     private final RpcTransport transport;
     private final AtomicInteger messageIdCounter = new AtomicInteger(1);
@@ -238,6 +240,13 @@ public class HandyRpcClient implements AutoCloseable
 
     private void handleMessage(byte[] data)
     {
+        // The raw bytes belong in the log: they are what tells a device that does not answer apart from one whose
+        // answer the app cannot use (a different id, another message type, a truncated frame).
+        if (log.isDebugEnabled())
+        {
+            log.debug("BLE message received ({} bytes): {}", data.length, HEX.formatHex(data));
+        }
+
         HandyRpc.RpcMessage message;
         try
         {
@@ -247,7 +256,8 @@ public class HandyRpcClient implements AutoCloseable
         {
             // Truncated, fragmented or unrelated payload: it cannot be answered or matched, dropping it keeps
             // the connection usable instead of failing the request that happens to wait right now.
-            log.warn("Dropping {} bytes that are not a (complete) RPC message: {}", data.length, e.getMessage());
+            log.warn("Dropping {} bytes that are not a (complete) RPC message: {} (raw: {})", data.length,
+                    e.getMessage(), HEX.formatHex(data));
             return;
         }
 
@@ -255,7 +265,7 @@ public class HandyRpcClient implements AutoCloseable
         {
             case MESSAGE_TYPE_RESPONSE -> handleResponse(message.getResponse());
             case MESSAGE_TYPE_NOTIFICATION -> handleNotification(message.getNotification());
-            default -> log.debug("Ignoring message of type {}", message.getType());
+            default -> log.debug("Ignoring message of type {} ({} bytes)", message.getType(), data.length);
         }
     }
 
@@ -271,11 +281,14 @@ public class HandyRpcClient implements AutoCloseable
         PendingRequest pending = pendingRequests.remove(id);
         if (pending == null)
         {
-            log.debug("Discarding response {} ({}): no request waits for it anymore (late, timed out or from a previous connection)",
-                    id, response.getResultCase());
+            log.debug("Discarding response {} ({}): no request waits for it anymore (late, timed out, or an id the"
+                            + " app did not send){}", id, response.getResultCase(),
+                    response.hasError() && response.getError().getCode() != 0
+                            ? " error=%d %s".formatted(response.getError().getCode(), response.getError().getMessage())
+                            : "");
             return;
         }
-        log.trace("Matched response {} to {} after {}ms ({} request(s) still waiting)",
+        log.debug("Matched response {} to {} after {}ms ({} request(s) still waiting)",
                 id, pending.description(), System.currentTimeMillis() - pending.sentAtMs(), pendingRequests.size());
         pending.future().complete(response);
     }
