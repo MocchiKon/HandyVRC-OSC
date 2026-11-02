@@ -21,6 +21,12 @@ public class Main
         LogCapture.install(); // Before anything is logged, so that the Logs tab shows the startup as well
         try
         {
+            // In every log: the OS and the JVM decide how Bluetooth behaves, so a support log has to show them.
+            log.info("Starting HandyVRC-OSC on {} {} ({}, Java {})", System.getProperty("os.name", "unknown OS"),
+                    System.getProperty("os.version", "unknown version"), System.getProperty("os.arch", "unknown arch"),
+                    System.getProperty("java.version", "unknown version"));
+            log.info("Launch mode: {}", LaunchMode.detect().description());
+
             var configLoader = new ConfigLoader(getAppConfigPath());
             ConfigProperties config = configLoader.readOrInitConfig();
 

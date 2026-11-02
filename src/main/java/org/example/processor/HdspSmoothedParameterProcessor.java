@@ -7,6 +7,7 @@ import org.example.diagnostics.DiagnosticTrace;
 import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
+import org.example.handy.common.RateLimitedLogger;
 import org.example.handy.common.dto.SliderSettingsResult;
 import org.example.handy.common.dto.SliderState;
 
@@ -328,6 +329,8 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     /** How often the measured input update rate is summarized in the debug log. */
     private static final int INPUT_RATE_LOG_INTERVAL_MS = 5_000;
 
+    /** One failed command produces one log line per try, which would flood the log while the device is broken. */
+    private final RateLimitedLogger commandWarnings = new RateLimitedLogger(log);
     private final int speedChangeThresholdPercent;
     private final int speedStopThresholdPercent;
     private final int divergenceThresholdPercent;
@@ -485,9 +488,27 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
 
         if (config.sliderMin() != null || config.sliderMax() != null)
         {
-            handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+            try
+            {
+                handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+            }
+            catch (RuntimeException e)
+            {
+                // The stroke range is a convenience, not a requirement: the movement commands themselves are
+                // fire-and-forget, so the session can run on the range the device already has.
+                log.warn("Could not set the stroke range on the device, using the range it has: {}", e.getMessage());
+            }
         }
-        Optional<SliderSettingsResult> sliderSettings = handyClient.getSliderSettings();
+        Optional<SliderSettingsResult> sliderSettings = Optional.empty();
+        try
+        {
+            sliderSettings = handyClient.getSliderSettings();
+        }
+        catch (RuntimeException e)
+        {
+            log.warn("Could not read the stroke range from the device, assuming a {} mm stroke: {}", DEFAULT_STROKE_MM,
+                    e.getMessage());
+        }
         sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
         // The minimum speed is a property of the device (mm/s), the moves are planned in units of the stroke zone
         Float strokeMm = sliderSettings.map(SliderSettingsResult::strokeMm).orElse(null);
@@ -1516,12 +1537,13 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
             HandyBaseResponseWithError response = handyClient.hdspXpt(normalizedXp, durationMs, stopOnTarget);
             if (response.error() != null)
             {
-                log.error("Error when sending HDSP command to Handy! (reason: {})", response.error().message());
+                commandWarnings.error("Error when sending HDSP command to Handy! (reason: "
+                        + response.error().message() + ")");
             }
         }
         catch (Exception e)
         {
-            log.error("Exception when sending HDSP command: {}", e.getMessage());
+            commandWarnings.error("Exception when sending HDSP command: " + e.getMessage());
         }
     }
 

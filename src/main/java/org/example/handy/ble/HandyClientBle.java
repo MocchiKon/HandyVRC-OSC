@@ -9,13 +9,24 @@ import org.example.handy.common.dto.SliderSettingsResult;
 import org.example.handy.common.dto.SliderState;
 
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 
 @Slf4j
 public class HandyClientBle extends HandyClient
 {
+    /** How long the device gets to answer the first requests of a new connection. */
+    private static final long HANDSHAKE_TIMEOUT_MS = 5_000;
+
     private final HandyBleAdapter ble;
     private final HandyRpcClient rpc;
     private final RateLimitedLogger notificationWarnings = new RateLimitedLogger(log);
+    /** One failed HDSP command produces one log line per try, which would flood the log while the device is broken. */
+    private final RateLimitedLogger commandWarnings = new RateLimitedLogger(log);
+    /**
+     * False when the device failed the start-up check. The optional queries then fail immediately instead of waiting
+     * for their timeouts (the movement commands are fire-and-forget and are still sent).
+     */
+    private volatile boolean responsive = true;
     /** Time of the last XPT command, used to say how long after it a notification arrived. */
     private volatile long lastXptAtNanos;
     private volatile float lastXp = Float.NaN;
@@ -27,6 +38,71 @@ public class HandyClientBle extends HandyClient
         this.ble = ble;
         this.rpc = new HandyRpcClient(ble);
         this.rpc.setNotificationListener(this::onNotification);
+    }
+
+    /**
+     * Makes sure the connected device actually answers requests, and logs what it is. A Handy that advertises and
+     * connects but does not answer (still waking up, in Wi-Fi mode, with a stale Bluetooth cache, or not a Handy at
+     * all) would otherwise fail later on some request with a timeout that says nothing about the cause. The movement
+     * commands themselves are fire-and-forget, so a device that answers this check can be driven.
+     */
+    public void verifyResponsive()
+    {
+        verifyResponsive(HANDSHAKE_TIMEOUT_MS);
+    }
+
+    /** Package-private variant that takes the timeout explicitly, used by the tests. */
+    void verifyResponsive(long timeoutMs)
+    {
+        log.info("Checking that the Handy answers (device '{}', MTU {} bytes)...", ble.getPeripheralName(), ble.getMtu());
+        try
+        {
+            HandyRpc.Response mode = rpc.sendRequest(HandyRpc.Request.newBuilder()
+                    .setRequestModeGet(Messages.RequestModeGet.getDefaultInstance()), timeoutMs);
+            responsive = true;
+            log.info("Handy answered: mode={}", mode.getResponseModeGet().getMode());
+        }
+        catch (TimeoutException e)
+        {
+            responsive = false;
+            throw new IllegalStateException("The Handy is connected but does not answer. Power-cycle it"
+                    + " and check that its LED is blue (Bluetooth mode)"
+                    + " then press Start again.", e);
+        }
+        catch (HandyDeviceException e)
+        {
+            // The device answered, it just did not accept this request: the optional queries still make sense.
+            throw new IllegalStateException("The Handy answered the connection but refused a request: %s"
+                    .formatted(e.getMessage()), e);
+        }
+        catch (Exception e)
+        {
+            responsive = false;
+            throw new IllegalStateException("Could not talk to the Handy over Bluetooth: %s".formatted(e.getMessage()), e);
+        }
+
+        try
+        {
+            HandyRpc.Response response = rpc.sendRequest(HandyRpc.Request.newBuilder()
+                    .setRequestCapabilitiesGet(Messages.RequestCapabilitiesGet.getDefaultInstance()), timeoutMs);
+            if (response.hasResponseCapabilitiesGet())
+            {
+                var capabilities = response.getResponseCapabilitiesGet();
+                log.info("Handy capabilities: sliders={}, battery={}, batteryDriver={}, bleMtu={}, vulvaOriented={}",
+                        capabilities.getSlider(), capabilities.getBattery(), capabilities.getBatteryDriver(),
+                        capabilities.getBleMtu(), capabilities.getVulvaOriented());
+                if (capabilities.getSlider() == 0)
+                {
+                    log.warn("The connected device reports no slider. The app needs a Handy; another Ohdoki device"
+                            + " nearby (an Oh!) can be picked up by the scan as well.");
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            // Only the answer to the mode request above matters; the details are a bonus for the log.
+            log.warn("Could not read the Handy capabilities: {}", e.getMessage());
+        }
     }
 
     @Override
@@ -87,7 +163,7 @@ public class HandyClientBle extends HandyClient
         }
         catch (Exception e)
         {
-            log.error("Exception when sending BLE HDSP XPT command: {}", e.getMessage());
+            commandWarnings.error("Exception when sending BLE HDSP XPT command: " + e.getMessage());
             return new HandyBaseResponseWithError(new HandyError(0, "HDSP_XPT_FAILED", e.getMessage(), true));
         }
     }
@@ -201,8 +277,11 @@ public class HandyClientBle extends HandyClient
         }
         switch (notification.getNotificationCase())
         {
+            case NOTIFICATION_BLE_STATUS_CHANGED -> log.info("[BLE] Device BLE state: {}",
+                    notification.getNotificationBleStatusChanged().getState());
             case NOTIFICATION_HDSP_CHANGED -> log.debug("[BLE] Notification: NOTIFICATION_HDSP_CHANGED ({})", sinceXpt);
             case NOTIFICATION_MODE_CHANGED -> log.debug("[BLE] Notification: NOTIFICATION_MODE_CHANGED ({})", sinceXpt);
+            case NOTIFICATION_STROKE_CHANGED -> log.debug("[BLE] Notification: NOTIFICATION_STROKE_CHANGED ({})", sinceXpt);
             case NOTIFICATION_LOW_MEMORY_ERROR -> notificationWarnings.warn(
                     "[BLE] Device dropped a message of %d bytes because it ran out of memory (available heap %d, largest free block %d)"
                             .formatted(notification.getNotificationLowMemoryError().getDiscardedMsgSize(),
@@ -216,7 +295,8 @@ public class HandyClientBle extends HandyClient
             case NOTIFICATION_TEMP_HIGH -> notificationWarnings.warn("[BLE] Device is overheating and may stop moving");
             case NOTIFICATION_SLIDER_BLOCKED -> notificationWarnings.warn("[BLE] Slider is blocked ({})".formatted(sinceXpt));
             case NOTIFICATION_IDLE_TIMEOUT -> log.warn("[BLE] Device is idle and will disconnect/sleep soon ({})", sinceXpt);
-            default -> log.trace("[BLE] Notification: {} ({})", notification.getNotificationCase(), sinceXpt);
+            // Seen at DEBUG, so that a log shows which notifications arrived without flooding it during a session.
+            default -> log.debug("[BLE] Notification: {} ({})", notification.getNotificationCase(), sinceXpt);
         }
     }
 }
