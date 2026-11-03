@@ -5,6 +5,7 @@ import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyBaseResponseWithError;
 import org.example.handy.common.HandyClient;
 import org.example.handy.common.dto.SliderSettingsResult;
+import org.example.handy.common.dto.SliderState;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -55,6 +56,31 @@ class HdspSmoothedParameterProcessorSliderSettingsTest
         assertThatCode(() -> new HdspSmoothedParameterProcessor(client, CONFIG)).doesNotThrowAnyException();
     }
 
+    @Test
+    void leavesTheDeviceOnItsFullStrokeWhenTheConnectionHasNoStrokeRange()
+    {
+        var client = new SliderRangeClient(false, false);
+        client.supportsSliderSettings = false;
+
+        assertThatCode(() -> new HdspSmoothedParameterProcessor(client, CONFIG)).doesNotThrowAnyException();
+
+        assertThat(client.setAttempted).isFalse();
+        assertThat(client.getAttempted).isFalse();
+    }
+
+    @Test
+    void doesNotReadTheDevicePositionWhenTheConnectionCannotReportIt()
+    {
+        var client = new SliderRangeClient(false, false);
+        client.supportsSliderState = false;
+
+        var processor = new HdspSmoothedParameterProcessor(client,
+                CONFIG.toBuilder().hdspLogDevicePosition(true).build());
+        processor.stop();
+
+        assertThat(client.stateAttempted).isFalse();
+    }
+
     /** Client whose stroke range requests fail on demand, like a device that ignores them. */
     private static final class SliderRangeClient extends HandyClient
     {
@@ -62,11 +88,26 @@ class HdspSmoothedParameterProcessorSliderSettingsTest
         private final boolean getFails;
         private boolean setAttempted;
         private boolean getAttempted;
+        private boolean stateAttempted;
+        private boolean supportsSliderSettings = true;
+        private boolean supportsSliderState = true;
 
         private SliderRangeClient(boolean setFails, boolean getFails)
         {
             this.setFails = setFails;
             this.getFails = getFails;
+        }
+
+        @Override
+        public boolean supportsSliderSettings()
+        {
+            return supportsSliderSettings;
+        }
+
+        @Override
+        public boolean supportsSliderState()
+        {
+            return supportsSliderState;
         }
 
         @Override
@@ -100,6 +141,13 @@ class HdspSmoothedParameterProcessorSliderSettingsTest
                 throw new RuntimeException("BLE SliderGet failed", new TimeoutException("no answer"));
             }
             return Optional.of(new SliderSettingsResult("0.2", "0.8", 20f, 80f));
+        }
+
+        @Override
+        public Optional<SliderState> getSliderState()
+        {
+            stateAttempted = true;
+            return Optional.empty();
         }
     }
 }

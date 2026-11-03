@@ -15,7 +15,7 @@ import java.util.Optional;
 /**
  * HDSP (Handy Direct Streaming Protocol) processor. HDSP has no device-side scheduling: the newest position
  * is sent together with the time the device should take to reach it (an XPT command). Because of that it is a best-effort, low-latency protocol that works best over a direct Bluetooth
- * connection (through Intiface every move is sent as a Buttplug LinearCmd).
+ * connection (through Intiface every move is sent as a Buttplug {@code HwPositionWithDuration} command).
  * <p>
  * The positions used inside the app are percentages (0-100), but HDSP works with normalized positions
  * (0.0-1.0 of the configured stroke zone). The conversion is done here, before the command is handed to a
@@ -63,29 +63,38 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
             throw new IllegalStateException("Could not change Handy mode to HDSP (reason: %s)".formatted(response.error().message()));
         }
 
-        if (config.sliderMin() != null || config.sliderMax() != null)
+        // Intiface has no stroke zone: the app deliberately leaves the device on its full stroke instead of
+        // emulating the range by shrinking the positions it sends.
+        if (handyClient.supportsSliderSettings())
         {
+            if (config.sliderMin() != null || config.sliderMax() != null)
+            {
+                try
+                {
+                    handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+                }
+                catch (RuntimeException e)
+                {
+                    // A device that does not answer the stroke range request can still be moved: the movement
+                    // commands are sent without waiting for a response, so the range it already has is used.
+                    log.warn("Could not set the stroke range on the device, using the range it has: {}", e.getMessage());
+                }
+            }
+            Optional<SliderSettingsResult> sliderSettings = Optional.empty();
             try
             {
-                handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+                sliderSettings = handyClient.getSliderSettings();
             }
             catch (RuntimeException e)
             {
-                // A device that does not answer the stroke range request can still be moved: the movement commands
-                // are sent without waiting for a response, so the range it already has is used.
-                log.warn("Could not set the stroke range on the device, using the range it has: {}", e.getMessage());
+                log.warn("Could not read the stroke range from the device: {}", e.getMessage());
             }
+            sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
         }
-        Optional<SliderSettingsResult> sliderSettings = Optional.empty();
-        try
+        else
         {
-            sliderSettings = handyClient.getSliderSettings();
+            log.info("Intiface does not support a stroke range: using the full stroke of the device");
         }
-        catch (RuntimeException e)
-        {
-            log.warn("Could not read the stroke range from the device: {}", e.getMessage());
-        }
-        sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
     }
 
     @Override

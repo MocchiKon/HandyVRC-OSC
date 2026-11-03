@@ -97,6 +97,9 @@ public class ConfigLoader
         return ConfigProperties.builder()
                 .connection(connection)
                 .intifaceAddress(getProperty(properties, "intifaceAddress").orElse(defaults.intifaceAddress()))
+                .intifaceDeviceIndex(getInt(properties, "intifaceDeviceIndex", defaults.intifaceDeviceIndex(), -1,
+                        Integer.MAX_VALUE))
+                .intifaceDeviceName(getProperty(properties, "intifaceDeviceName").orElse(defaults.intifaceDeviceName()))
                 .spsType(spsType)
                 .interactWith(interactWith)
                 .processingAlgorithm(processingAlgorithm)
@@ -188,6 +191,12 @@ public class ConfigLoader
                 "DIRECT (default, recommended: the app connects to the Handy over Bluetooth) or INTIFACE (through Intiface Central).");
         entry(out, "intifaceAddress", config.intifaceAddress(),
                 "WebSocket address of the Intiface Central server. Only used when connection=INTIFACE.");
+        entry(out, "intifaceDeviceIndex", config.intifaceDeviceIndex(),
+                "Intiface index of the selected device (unique even when two devices have the same name). -1 uses the"
+                        + " first device that can be moved to a position. Only used when connection=INTIFACE.");
+        entry(out, "intifaceDeviceName", config.intifaceDeviceName(),
+                "Display label of the selected device, shown while it is not connected to Intiface Central. Blank uses"
+                        + " the first device that can be moved to a position. Only used when connection=INTIFACE.");
         entry(out, "spsType", config.spsType(),
                 "PENETRATOR or ORIFICE: which SPS component of your avatar moves the device.");
         entry(out, "interactWith", config.interactWith(),

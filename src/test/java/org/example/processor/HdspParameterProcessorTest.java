@@ -89,6 +89,29 @@ class HdspParameterProcessorTest
     }
 
     @Test
+    void doesNotTouchTheStrokeRangeWhenTheConnectionDoesNotSupportIt()
+    {
+        var client = new RecordingHandyClient()
+        {
+            @Override
+            public boolean supportsSliderSettings()
+            {
+                return false;
+            }
+        };
+        var processor = new HdspParameterProcessor(client, ConfigProperties.builder()
+                .spsType(SpsType.PENETRATOR)
+                .minimalValueChange(0)
+                .sliderMin(0.2f)
+                .sliderMax(0.8f)
+                .build());
+        processor.stop();
+
+        assertThat(client.sliderSettingsSet).isFalse();
+        assertThat(client.sliderSettingsRead).isFalse();
+    }
+
+    @Test
     void firstPointIsSentWithSendIntervalAndWithoutStopOnTarget()
     {
         var client = new RecordingHandyClient();
@@ -201,6 +224,8 @@ class HdspParameterProcessorTest
     private static class RecordingHandyClient extends HandyClient
     {
         final List<HdspCall> hdspCalls = new ArrayList<>();
+        boolean sliderSettingsSet;
+        boolean sliderSettingsRead;
 
         @Override
         public HandyBaseResponseWithError changeMode(DeviceMode mode)
@@ -217,11 +242,13 @@ class HdspParameterProcessorTest
         @Override
         public void setSliderSettings(Float min, Float max)
         {
+            sliderSettingsSet = true;
         }
 
         @Override
         public Optional<SliderSettingsResult> getSliderSettings()
         {
+            sliderSettingsRead = true;
             return Optional.empty();
         }
 

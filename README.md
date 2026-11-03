@@ -31,22 +31,22 @@ See it in action: [https://x.com/MocchiKon/status/2116869874005717483](https://x
 ## Connecting through Intiface
 
 :warning:**Important:** Other strokers that Intiface supports (or any device that can be moved to a position) **might work**,
-but they are **not tested**.
+but they are **not tested**. When connecting via Intiface the **stroke range setting is ignored** (the device keeps its full
+stroke), **stop-on-target does not work**, and the **slider movement will not be as good** as with a Direct connection.
+**Reverse movement** works in both connection modes.
 
-By default (**Connection: Direct**, recommended) the app connects to the Handy over Bluetooth by itself. If you'd rather
+By default the app connects to the Handy directly over Bluetooth by itself. If you'd rather
 let [Intiface Central](https://intiface.com/central/) handle the device:
 
 1. Start Intiface Central, start its server and connect your device there.
 2. In the app, switch **Connection** to **Intiface**. The **Intiface address** is `ws://127.0.0.1:12345` unless you
    changed the server port in Intiface Central.
-3. Press **Start**. The app uses the first device Intiface offers that can be moved to a position.
-
-Direct is still the better choice for the Handy: it has the lowest latency, and some Smoothed mode features (reading
-the slider position) only work with it.
+3. Press **Refresh** next to **Device** and pick the stroker you want to use.
+4. Press **Start**.
 
 ## Tips
 
-* Use **Direct** connection mode instead of Intiface if you can (TheHandy only).
+* Use **Direct** connection mode instead of Intiface if you can (The Handy only).
 * Use the **full stroke range** if you can. A very short range makes slow movements hard for the Handy.
 * Perform movements towards the base, positioning during act is very important due to how SPS works.
 * If **Smoothed** movement mode does not work well for you then try **Direct**.

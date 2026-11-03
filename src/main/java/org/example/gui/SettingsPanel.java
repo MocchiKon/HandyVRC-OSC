@@ -4,6 +4,8 @@ import org.example.config.ConfigProperties;
 import org.example.config.ConnectionType;
 import org.example.config.InteractWith;
 import org.example.diagnostics.DeviceProfile;
+import org.example.handy.intiface.ButtplugConnection;
+import org.example.handy.intiface.IntifaceDeviceConnector;
 import org.example.processor.ParameterProcessorType;
 import org.example.processor.SpsType;
 import org.slf4j.Logger;
@@ -14,6 +16,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.lang.reflect.RecordComponent;
+import java.net.URI;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -30,6 +33,13 @@ import static org.example.gui.SettingRows.*;
  */
 public class SettingsPanel extends JPanel
 {
+    /** Reads the devices Intiface Central knows; the app controller reuses its connection when it has one. */
+    @FunctionalInterface
+    public interface IntifaceDiscovery
+    {
+        List<ButtplugConnection.Device> discover(URI uri) throws Exception;
+    }
+
     private static final String BASIC = "basic";
     private static final String ADVANCED = "advanced";
     private static final String LOGS = "logs";
@@ -51,6 +61,7 @@ public class SettingsPanel extends JPanel
     private DeviceProfile deviceProfile;
     private final Consumer<ConfigProperties> changeListener;
     private final Runnable onCalibrate;
+    private final IntifaceDiscovery intifaceDiscovery;
     private final Timer settingLogTimer = new Timer(SETTING_LOG_DELAY_MS, e -> logSettingChangesWhenIdle());
     /** True while the controls are set from the settings, so that doing so does not count as a change. */
     private boolean updating;
@@ -61,6 +72,19 @@ public class SettingsPanel extends JPanel
     private final ModernTextField intifaceAddress = new ModernTextField("", 20);
     private final WrappingText intifaceAddressError = new WrappingText("", Theme.regular(12f), Theme.ERROR);
     private JPanel intifaceAddressRow;
+    private final ModernComboBox<DeviceChoice> intifaceDevice = new ModernComboBox<>();
+    private final ModernButton refreshIntifaceDevicesButton = new ModernButton("Refresh", ModernButton.Style.GHOST);
+    private final WrappingText intifaceDeviceHint = new WrappingText("", Theme.regular(12f), Theme.TEXT_MUTED);
+    private JPanel intifaceDeviceRow;
+    private final WrappingText handyIntifaceWarning = new WrappingText(
+            "Direct connection is strongly recommended for The Handy. When using Intiface the"
+                    + " stroke range setting is ignored (the device keeps its full stroke), stop-on-target does not"
+                    + " work, and slider movement will not be as good.", Theme.regular(12f), Theme.WARNING);
+    private JComponent handyIntifaceWarningRow;
+    /** Devices the last Refresh found, used to build the choices without losing the selected one. */
+    private List<ButtplugConnection.Device> discoveredIntifaceDevices = List.of();
+    /** True while a Refresh is running, so that a second one cannot start. */
+    private boolean discoveringIntifaceDevices;
     private final SegmentedControl<SpsType> spsType;
     private final SegmentedControl<InteractWith> interactWith;
     private final SegmentedControl<ParameterProcessorType> algorithm;
@@ -123,10 +147,17 @@ public class SettingsPanel extends JPanel
     public SettingsPanel(ConfigProperties initialConfig, Consumer<ConfigProperties> changeListener,
                          Runnable onCalibrate)
     {
+        this(initialConfig, changeListener, onCalibrate, IntifaceDeviceConnector::discover);
+    }
+
+    public SettingsPanel(ConfigProperties initialConfig, Consumer<ConfigProperties> changeListener,
+                         Runnable onCalibrate, IntifaceDiscovery intifaceDiscovery)
+    {
         super(new BorderLayout(0, 12));
         this.config = initialConfig;
         this.changeListener = changeListener;
         this.onCalibrate = onCalibrate;
+        this.intifaceDiscovery = intifaceDiscovery != null ? intifaceDiscovery : IntifaceDeviceConnector::discover;
         this.settingLogTimer.setRepeats(false);
         setOpaque(false);
 
@@ -165,6 +196,12 @@ public class SettingsPanel extends JPanel
                                 + " speed, stopping where you stop. Smooth movement without overshooting.")),
                 initialConfig.processingAlgorithm(), false);
 
+        intifaceDevice.addItem(DeviceChoice.automatic());
+        refreshIntifaceDevicesButton.setGlyph(ModernButton.Glyph.REFRESH);
+        refreshIntifaceDevicesButton.setToolTipText(Theme.tooltip(
+                "Reads the devices Intiface Central currently knows. Connect your stroker in Intiface Central first."));
+        refreshIntifaceDevicesButton.addActionListener(e -> refreshIntifaceDevices());
+
         var tabs = new SegmentedControl<>(List.of(
                 new SegmentedControl.Option<>(BASIC, "Basic", "The settings most people need."),
                 new SegmentedControl.Option<>(ADVANCED, "Advanced",
@@ -185,6 +222,11 @@ public class SettingsPanel extends JPanel
         installSliderCommitListeners();
         setConfig(initialConfig);
         refreshDeviceProfile();
+        if (initialConfig.connection() == ConnectionType.INTIFACE)
+        {
+            // Fill the device dropdown on startup, without blocking the window from opening.
+            SwingUtilities.invokeLater(this::refreshIntifaceDevices);
+        }
     }
 
     public ConfigProperties getConfig()
@@ -203,6 +245,7 @@ public class SettingsPanel extends JPanel
             connection.setSelected(newConfig.connection());
             intifaceAddress.setText(newConfig.intifaceAddress());
             intifaceAddress.setCaretPosition(0);
+            updateIntifaceDeviceChoices(newConfig.intifaceDeviceIndex(), newConfig.intifaceDeviceName());
             spsType.setSelected(newConfig.spsType());
             interactWith.setSelected(newConfig.interactWith());
             algorithm.setSelected(newConfig.processingAlgorithm());
@@ -332,13 +375,19 @@ public class SettingsPanel extends JPanel
     {
         boolean intiface = config.connection() == ConnectionType.INTIFACE;
         connectionHint.setText(intiface
-                ? "Start Intiface Central and its server before pressing Start."
+                ? "Start Intiface Central and its server, connect your device there, and pick it below."
                 : "Recommended: connects to your Handy over Bluetooth.");
         intifaceAddressRow.setVisible(intiface);
+        if (intifaceDeviceRow != null)
+        {
+            intifaceDeviceRow.setVisible(intiface);
+        }
+        updateHandyIntifaceWarning();
         String addressError = intiface ? ConfigProperties.validateIntifaceAddress(config.intifaceAddress()) : null;
         intifaceAddressError.setText(addressError == null ? "" : addressError);
         intifaceAddressError.setVisible(addressError != null);
         intifaceAddress.setInvalid(addressError != null);
+        updateIntifaceControlAvailability();
 
         boolean smoothed = config.processingAlgorithm() == ParameterProcessorType.HDSP_SMOOTHED;
         smoothedSection.setVisible(smoothed);
@@ -377,10 +426,286 @@ public class SettingsPanel extends JPanel
         repaint();
     }
 
+    /**
+     * Intiface Central can only send positions: Buttplug has no stroke zone, cannot read the device position, and
+     * does not honor stop-on-target. The settings that need those features are disabled there instead of silently
+     * doing nothing (the old code even applied the stroke range by shrinking every position in the app).
+     */
+    private void updateIntifaceControlAvailability()
+    {
+        boolean direct = config.connection() != ConnectionType.INTIFACE;
+        strokeRange.setEnabled(direct);
+        pauseOnStarving.setEnabled(direct);
+        logDevicePosition.setEnabled(direct);
+        deviceLogInterval.setEnabled(direct);
+    }
+
+    /** Warns that Intiface cannot provide the Handy-specific features, so Direct is the better choice. */
+    private void updateHandyIntifaceWarning()
+    {
+        if (handyIntifaceWarningRow == null)
+        {
+            return;
+        }
+        boolean visible = config.connection() == ConnectionType.INTIFACE
+                && IntifaceDeviceConnector.isHandy(config.intifaceDeviceName());
+        if (handyIntifaceWarningRow.isVisible() == visible)
+        {
+            return;
+        }
+        handyIntifaceWarningRow.setVisible(visible);
+        if (handyIntifaceWarningRow.getParent() != null)
+        {
+            handyIntifaceWarningRow.getParent().revalidate();
+        }
+        revalidate();
+        repaint();
+    }
+
+    /**
+     * Rebuilds the device choices from the devices found by the last Refresh. Every device gets its own entry, even
+     * when several report the same device name (two simulated strokers do): the Intiface index is what the choice
+     * stores, because names are not unique. The selected device is kept even when it is not connected at the moment,
+     * so that starting later still uses it.
+     */
+    private void updateIntifaceDeviceChoices(Integer selectedDeviceIndex, String selectedDeviceName)
+    {
+        String selected = selectedDeviceName == null ? "" : selectedDeviceName.trim();
+        int wantedIndex = selectedDeviceIndex == null ? -1 : selectedDeviceIndex;
+        boolean wasUpdating = updating;
+        updating = true;
+        try
+        {
+            intifaceDevice.removeAllItems();
+            intifaceDevice.addItem(DeviceChoice.automatic());
+            List<ButtplugConnection.Device> usable = discoveredIntifaceDevices.stream()
+                    .filter(ButtplugConnection.Device::hasPositionControl)
+                    .toList();
+            for (ButtplugConnection.Device device : usable)
+            {
+                intifaceDevice.addItem(new DeviceChoice(device.index(), device.displayLabel()));
+            }
+            // A setting written by an older version has no index: find the device by its old name/display label.
+            int resolvedIndex = selectableIndex(usable, wantedIndex, selected);
+            if (resolvedIndex < 0 && !selected.isEmpty())
+            {
+                // Not connected now: keep it in the list so that the saved choice is not silently forgotten.
+                intifaceDevice.addItem(new DeviceChoice(wantedIndex, selected, selected + " (not connected)"));
+            }
+            selectIntifaceDevice(resolvedIndex, selected);
+        }
+        finally
+        {
+            updating = wasUpdating;
+        }
+        updateHandyIntifaceWarning();
+    }
+
+    /** @return the index of the device that belongs to the saved setting, or -1 when it is not connected */
+    private int selectableIndex(List<ButtplugConnection.Device> usable, int wantedIndex, String selected)
+    {
+        if (!selected.isEmpty())
+        {
+            // The display label is what new settings store; the device name covers settings from older versions.
+            // It wins over the index because the Intiface index can change when a device reconnects.
+            if (wantedIndex >= 0)
+            {
+                for (ButtplugConnection.Device device : usable)
+                {
+                    if (device.index() == wantedIndex && matchesName(device, selected))
+                    {
+                        return wantedIndex;
+                    }
+                }
+            }
+            for (ButtplugConnection.Device device : usable)
+            {
+                if (matchesName(device, selected))
+                {
+                    return device.index();
+                }
+            }
+        }
+        if (wantedIndex >= 0)
+        {
+            for (ButtplugConnection.Device device : usable)
+            {
+                if (device.index() == wantedIndex)
+                {
+                    return wantedIndex;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static boolean matchesName(ButtplugConnection.Device device, String name)
+    {
+        return !name.isEmpty()
+                && (device.displayLabel().equalsIgnoreCase(name) || device.name().equalsIgnoreCase(name));
+    }
+
+    private void selectIntifaceDevice(int resolvedIndex, String selectedName)
+    {
+        int target = -1;
+        if (resolvedIndex >= 0)
+        {
+            for (int i = 0; i < intifaceDevice.getItemCount(); i++)
+            {
+                if (intifaceDevice.getItemAt(i).index() == resolvedIndex)
+                {
+                    target = i;
+                    break;
+                }
+            }
+        }
+        else if (!selectedName.isEmpty())
+        {
+            String disconnected = selectedName + " (not connected)";
+            for (int i = 0; i < intifaceDevice.getItemCount(); i++)
+            {
+                if (intifaceDevice.getItemAt(i).label().equalsIgnoreCase(disconnected))
+                {
+                    target = i;
+                    break;
+                }
+            }
+        }
+        intifaceDevice.setSelectedIndex(target >= 0 ? target : 0);
+    }
+
+    /** @return true when this device is (or would be used as) the one saved in the settings */
+    private static boolean isSelectedDevice(ButtplugConnection.Device device, Integer selectedDeviceIndex,
+                                            String selectedDeviceName)
+    {
+        String selected = selectedDeviceName == null ? "" : selectedDeviceName.trim();
+        if (matchesName(device, selected))
+        {
+            return true;
+        }
+        return selectedDeviceIndex != null && selectedDeviceIndex >= 0 && device.index() == selectedDeviceIndex;
+    }
+
+    /** Reads the devices Intiface Central knows without blocking the GUI. */
+    private void refreshIntifaceDevices()
+    {
+        if (discoveringIntifaceDevices)
+        {
+            return;
+        }
+        URI uri = ConfigProperties.intifaceUri(config.intifaceAddress());
+        if (uri == null)
+        {
+            showIntifaceDeviceHint("Enter a valid Intiface address first.", Theme.ERROR);
+            return;
+        }
+        discoveringIntifaceDevices = true;
+        refreshIntifaceDevicesButton.setEnabled(false);
+        refreshIntifaceDevicesButton.setText("Searching...");
+        showIntifaceDeviceHint("Looking for devices in Intiface Central...", Theme.TEXT_MUTED);
+        new SwingWorker<List<ButtplugConnection.Device>, Void>()
+        {
+            @Override
+            protected List<ButtplugConnection.Device> doInBackground() throws Exception
+            {
+                // The controller reuses its open Intiface connection when there is one: some servers refuse a
+                // second client, which would make every Refresh fail while the app is connected.
+                return intifaceDiscovery.discover(uri);
+            }
+
+            @Override
+            protected void done()
+            {
+                discoveringIntifaceDevices = false;
+                refreshIntifaceDevicesButton.setEnabled(true);
+                refreshIntifaceDevicesButton.setText("Refresh");
+                try
+                {
+                    discoveredIntifaceDevices = get();
+                    updateIntifaceDeviceChoices(config.intifaceDeviceIndex(), config.intifaceDeviceName());
+                    showDeviceDiscoveryResult();
+                }
+                catch (Exception e)
+                {
+                    if (e instanceof InterruptedException)
+                    {
+                        Thread.currentThread().interrupt();
+                    }
+                    discoveredIntifaceDevices = List.of();
+                    updateIntifaceDeviceChoices(config.intifaceDeviceIndex(), config.intifaceDeviceName());
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    showIntifaceDeviceHint("Could not read the devices: " + cause.getMessage(), Theme.ERROR);
+                }
+            }
+        }.execute();
+    }
+
+    /** Explains an empty result or a selected device that is not connected; says nothing when everything is fine. */
+    private void showDeviceDiscoveryResult()
+    {
+        if (discoveringIntifaceDevices)
+        {
+            return;
+        }
+        List<ButtplugConnection.Device> usable = discoveredIntifaceDevices.stream()
+                .filter(ButtplugConnection.Device::hasPositionControl)
+                .toList();
+        if (usable.isEmpty())
+        {
+            showIntifaceDeviceHint("No device that can be moved to a position was found. Connect your stroker in"
+                    + " Intiface Central and press Refresh.", Theme.WARNING);
+            return;
+        }
+        String selected = config.intifaceDeviceName() == null ? "" : config.intifaceDeviceName().trim();
+        boolean connected = usable.stream()
+                .anyMatch(device -> isSelectedDevice(device, config.intifaceDeviceIndex(), selected));
+        if (!selected.isEmpty() && !connected)
+        {
+            showIntifaceDeviceHint("The selected device is not connected to Intiface Central. Connect it there and"
+                    + " press Refresh, or choose another device.", Theme.WARNING);
+            return;
+        }
+        hideIntifaceDeviceHint();
+    }
+
+    private void showIntifaceDeviceHint(String text, Color color)
+    {
+        intifaceDeviceHint.setForeground(color);
+        intifaceDeviceHint.setText(text);
+        intifaceDeviceHint.setVisible(true);
+        revalidate();
+        repaint();
+    }
+
+    private void hideIntifaceDeviceHint()
+    {
+        intifaceDeviceHint.setText("");
+        intifaceDeviceHint.setVisible(false);
+        revalidate();
+        repaint();
+    }
+
     private void installListeners()
     {
-        connection.setSelectionListener(value -> update(b -> b.connection(value)));
+        connection.setSelectionListener(value ->
+        {
+            update(b -> b.connection(value));
+            if (value == ConnectionType.INTIFACE)
+            {
+                // The list is only useful while Intiface is selected; refresh it as soon as the row appears.
+                refreshIntifaceDevices();
+            }
+        });
         onTextChange(intifaceAddress, () -> update(b -> b.intifaceAddress(intifaceAddress.getText().trim())));
+        intifaceDevice.addActionListener(e ->
+        {
+            if (updating || !(intifaceDevice.getSelectedItem() instanceof DeviceChoice choice))
+            {
+                return;
+            }
+            update(b -> b.intifaceDeviceIndex(choice.index()).intifaceDeviceName(choice.name()));
+            showDeviceDiscoveryResult();
+        });
         spsType.setSelectionListener(value -> update(b -> b.spsType(value)
                 .avatarParameter(customAvatarParameter.isSelected() ? config.avatarParameter()
                         : ConfigProperties.defaultAvatarParameter(value, config.interactWith()))));
@@ -520,6 +845,40 @@ public class SettingsPanel extends JPanel
                 + " there."));
         intifaceAddressRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         device.add(intifaceAddressRow);
+
+        intifaceDevice.setAlignmentX(Component.LEFT_ALIGNMENT);
+        intifaceDeviceHint.setVisible(false);
+        intifaceDeviceRow = verticalRow();
+        intifaceDeviceRow.add(Box.createVerticalStrut(12));
+        intifaceDeviceRow.add(title("Device"));
+        intifaceDeviceRow.add(Box.createVerticalStrut(8));
+        var deviceControl = new JPanel(new BorderLayout(8, 0))
+        {
+            @Override
+            public Dimension getMaximumSize()
+            {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        deviceControl.setOpaque(false);
+        deviceControl.add(intifaceDevice, BorderLayout.CENTER);
+        deviceControl.add(refreshIntifaceDevicesButton, BorderLayout.EAST);
+        intifaceDeviceRow.add(deviceControl);
+        intifaceDeviceRow.add(Box.createVerticalStrut(6));
+        intifaceDeviceRow.add(intifaceDeviceHint);
+        handyIntifaceWarningRow = verticalRow();
+        handyIntifaceWarningRow.add(Box.createVerticalStrut(6));
+        handyIntifaceWarningRow.add(handyIntifaceWarning);
+        handyIntifaceWarningRow.setVisible(false);
+        intifaceDeviceRow.add(handyIntifaceWarningRow);
+        for (Component component : intifaceDeviceRow.getComponents())
+        {
+            ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        applyTooltip(intifaceDeviceRow, Theme.tooltip("The stroker Intiface Central should use. Connect the device in"
+                + " Intiface Central, press Refresh, and pick it here."));
+        intifaceDeviceRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        device.add(intifaceDeviceRow);
         page.add(device);
         page.add(Box.createVerticalStrut(12));
 
@@ -562,7 +921,8 @@ public class SettingsPanel extends JPanel
                 algorithm));
         addRow(movement, rangeRow("Stroke range",
                 "The part of the stroke the device uses: drag the left handle to raise the bottom, the right handle"
-                        + " to lower the top. Your whole movement is mapped onto this range.",
+                        + " to lower the top. Your whole movement is mapped onto this range. Not used with Intiface:"
+                        + " the device keeps its full stroke there.",
                 strokeRange, (low, high) -> "%d%% – %d%%".formatted(low, high)));
         addRow(movement, sliderRow("Fully penetrated at",
                 "Penetration that counts as fully penetrated, so that you reach the bottom of the stroke without"
@@ -600,6 +960,8 @@ public class SettingsPanel extends JPanel
         page.add(restoreDefaultsButton(defaults -> config.toBuilder()
                 .connection(defaults.connection())
                 .intifaceAddress(defaults.intifaceAddress())
+                .intifaceDeviceIndex(defaults.intifaceDeviceIndex())
+                .intifaceDeviceName(defaults.intifaceDeviceName())
                 .spsType(defaults.spsType())
                 .interactWith(defaults.interactWith())
                 .processingAlgorithm(defaults.processingAlgorithm())
@@ -671,8 +1033,9 @@ public class SettingsPanel extends JPanel
                 reversalMinDistance, value -> "%.1f%%".formatted(value / 10f)));
         addRow(smoothedSection, toggleRow("Log device position", "Diagnostics, leave off for normal use",
                 "Logs the position the device reports (log level DEBUG) next to the position the app believes it"
-                        + " is at, with the active move and the newest input value. Every report is an extra Bluetooth"
-                        + " request. Direct connection only: Intiface cannot report the position.",
+                        + " is at, with the active move and the newest input value. Every report is an extra device"
+                        + " request. Needs a Direct connection: devices driven through Intiface cannot report their"
+                        + " position.",
                 logDevicePosition));
         deviceLogIntervalRow = sliderRow("Device log interval",
                 "How often the device position is read while logging. Each read is a Bluetooth round trip (about"
@@ -699,7 +1062,8 @@ public class SettingsPanel extends JPanel
                 minimalValueChange, value -> value + "%"));
         addRow(directSection, toggleRow("Pause on starving", "Stop at every position instead of moving on (on by default)",
                 "Direct mode only. The device stops when it reaches a position, instead of carrying on while it waits"
-                        + " for the next one. Avoids overshooting, but the movement can feel choppier.",
+                        + " for the next one. Avoids overshooting, but the movement can feel choppier. Not used with"
+                        + " Intiface, which does not support stop-on-target.",
                 pauseOnStarving));
         addRow(directSection, sliderRow("Send interval",
                 "Minimum time between two commands sent to the device. At least 20 ms are always kept to not flood"
@@ -956,6 +1320,29 @@ public class SettingsPanel extends JPanel
     private static <T> T orDefault(T value, T defaultValue)
     {
         return value != null ? value : defaultValue;
+    }
+
+    /**
+     * One entry of the Intiface device dropdown. The index identifies the device (device names are not unique); the
+     * name is the display label saved alongside it, so that the choice can be shown while it is not connected.
+     */
+    private record DeviceChoice(int index, String name, String label)
+    {
+        DeviceChoice(int index, String label)
+        {
+            this(index, label, label);
+        }
+
+        static DeviceChoice automatic()
+        {
+            return new DeviceChoice(-1, "", "First available device");
+        }
+
+        @Override
+        public String toString()
+        {
+            return label;
+        }
     }
 
     /** Column that always has the width of the scroll pane, so that only vertical scrolling is needed. */

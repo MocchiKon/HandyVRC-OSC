@@ -372,11 +372,37 @@ class ConfigLoaderTest
         var config = loadConfig("""
                 connection=intiface
                 intifaceAddress=ws://192.168.1.20:12345
+                intifaceDeviceIndex=3
+                intifaceDeviceName=MyTest1 (Simulated Stroker)
                 """);
 
         assertThat(config.connection()).isEqualTo(ConnectionType.INTIFACE);
         assertThat(config.intifaceAddress()).isEqualTo("ws://192.168.1.20:12345");
+        assertThat(config.intifaceDeviceIndex()).isEqualTo(3);
+        assertThat(config.intifaceDeviceName()).isEqualTo("MyTest1 (Simulated Stroker)");
         assertThat(config.validate()).isNull();
+    }
+
+    @Test
+    void usesTheFirstAvailableIntifaceDeviceByDefault() throws IOException
+    {
+        var config = loadConfig("""
+                connection=INTIFACE
+                """);
+
+        assertThat(config.intifaceDeviceIndex()).isEqualTo(-1);
+        assertThat(config.intifaceDeviceName()).isEmpty();
+    }
+
+    @Test
+    void invalidIntifaceDeviceIndexFallsBackToTheFirstAvailableDevice() throws IOException
+    {
+        var config = loadConfig("""
+                connection=INTIFACE
+                intifaceDeviceIndex=not-a-number
+                """);
+
+        assertThat(config.intifaceDeviceIndex()).isEqualTo(-1);
     }
 
     @Test
@@ -400,12 +426,16 @@ class ConfigLoaderTest
         var config = ConfigProperties.defaults().toBuilder()
                 .connection(ConnectionType.INTIFACE)
                 .intifaceAddress("ws://localhost:1234")
+                .intifaceDeviceIndex(3)
+                .intifaceDeviceName("MyTest1 (Simulated Stroker)")
                 .build();
 
         var reread = loadConfig(ConfigLoader.format(config));
 
         assertThat(reread.connection()).isEqualTo(ConnectionType.INTIFACE);
         assertThat(reread.intifaceAddress()).isEqualTo("ws://localhost:1234");
+        assertThat(reread.intifaceDeviceIndex()).isEqualTo(3);
+        assertThat(reread.intifaceDeviceName()).isEqualTo("MyTest1 (Simulated Stroker)");
     }
 
     private ConfigProperties loadConfig(String configContent) throws IOException

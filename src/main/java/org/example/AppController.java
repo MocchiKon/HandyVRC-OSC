@@ -7,7 +7,8 @@ import org.example.diagnostics.StepResponseCalibration;
 import org.example.handy.ble.HandyBleAdapter;
 import org.example.handy.ble.HandyClientBle;
 import org.example.handy.common.HandyClient;
-import org.example.handy.intiface.HandyClientIntiface;
+import org.example.handy.intiface.ButtplugConnection;
+import org.example.handy.intiface.IntifaceDeviceConnector;
 import org.example.oscquery.OscQueryService;
 import org.example.oscquery.OscQueryServiceProfile;
 import org.example.oscquery.VrchatParameterScanner;
@@ -128,6 +129,16 @@ public class AppController implements AutoCloseable
         return status;
     }
 
+    /**
+     * Lists the devices Intiface Central knows, for the device dropdown in the settings. When the app already holds
+     * a connection to the same Intiface server, that connection is used: Intiface Central may refuse a second client,
+     * which made every Refresh fail (until the app was restarted) once a device had been connected.
+     */
+    public List<ButtplugConnection.Device> discoverIntifaceDevices(URI uri) throws IOException
+    {
+        return IntifaceDeviceConnector.discover(client, uri);
+    }
+
     /** Connects the device (when it is not connected yet) and starts processing the avatar parameters. */
     public void start(ConfigProperties config)
     {
@@ -226,6 +237,12 @@ public class AppController implements AutoCloseable
             if (status.state() != State.RUNNING)
             {
                 setStatus(State.ERROR, "Start the device before running the step-response calibration.");
+                return;
+            }
+            if (connectedWith != null && connectedWith.type() == ConnectionType.INTIFACE)
+            {
+                setStatus(State.ERROR, "The step-response calibration needs a Direct Bluetooth connection: Intiface"
+                        + " cannot report the device position. Change Connection to Direct on the Basic tab.");
                 return;
             }
             calibrationRunning = true;
@@ -438,7 +455,8 @@ public class AppController implements AutoCloseable
         client = switch (connection.type())
         {
             case DIRECT -> connectBluetooth();
-            case INTIFACE -> HandyClientIntiface.connect(connection.intifaceUri());
+            case INTIFACE -> IntifaceDeviceConnector.connect(connection.intifaceUri(),
+                    connection.intifaceDeviceIndex(), connection.intifaceDeviceName());
         };
         connectedWith = connection;
         log.info("Device connected ({})", connection.type().getLabel());
@@ -637,15 +655,21 @@ public class AppController implements AutoCloseable
     /**
      * The settings a device connection is made with.
      *
-     * @param intifaceUri address of Intiface Central, null for a direct connection
+     * @param intifaceUri         address of Intiface Central, null for a direct connection
+     * @param intifaceDeviceIndex Intiface index of the selected device, -1 to use the first movable device
+     * @param intifaceDeviceName  selected device display label, blank to use the first device that can be moved
      */
-    private record DeviceConnection(ConnectionType type, URI intifaceUri)
+    private record DeviceConnection(ConnectionType type, URI intifaceUri, int intifaceDeviceIndex,
+                                    String intifaceDeviceName)
     {
         static DeviceConnection of(ConfigProperties config)
         {
             ConnectionType type = config.connection() != null ? config.connection() : ConnectionType.DIRECT;
+            boolean intiface = type == ConnectionType.INTIFACE;
             return new DeviceConnection(type,
-                    type == ConnectionType.INTIFACE ? ConfigProperties.intifaceUri(config.intifaceAddress()) : null);
+                    intiface ? ConfigProperties.intifaceUri(config.intifaceAddress()) : null,
+                    intiface && config.intifaceDeviceIndex() != null ? config.intifaceDeviceIndex() : -1,
+                    intiface && config.intifaceDeviceName() != null ? config.intifaceDeviceName().trim() : "");
         }
     }
 

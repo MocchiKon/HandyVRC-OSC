@@ -486,30 +486,39 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         log.debug("HDSP_SMOOTHED does not apply minimalValueChange ({}): raw OSC values are needed to notice that"
                 + " the user stopped moving", config.minimalValueChange());
 
-        if (config.sliderMin() != null || config.sliderMax() != null)
+        // Intiface has no stroke zone: the app deliberately leaves the device on its full stroke instead of
+        // emulating the range by shrinking the positions it sends.
+        Optional<SliderSettingsResult> sliderSettings = Optional.empty();
+        if (handyClient.supportsSliderSettings())
         {
+            if (config.sliderMin() != null || config.sliderMax() != null)
+            {
+                try
+                {
+                    handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+                }
+                catch (RuntimeException e)
+                {
+                    // The stroke range is a convenience, not a requirement: the movement commands themselves are
+                    // fire-and-forget, so the session can run on the range the device already has.
+                    log.warn("Could not set the stroke range on the device, using the range it has: {}", e.getMessage());
+                }
+            }
             try
             {
-                handyClient.setSliderSettings(config.sliderMin(), config.sliderMax());
+                sliderSettings = handyClient.getSliderSettings();
             }
             catch (RuntimeException e)
             {
-                // The stroke range is a convenience, not a requirement: the movement commands themselves are
-                // fire-and-forget, so the session can run on the range the device already has.
-                log.warn("Could not set the stroke range on the device, using the range it has: {}", e.getMessage());
+                log.warn("Could not read the stroke range from the device, assuming a {} mm stroke: {}",
+                        DEFAULT_STROKE_MM, e.getMessage());
             }
+            sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
         }
-        Optional<SliderSettingsResult> sliderSettings = Optional.empty();
-        try
+        else
         {
-            sliderSettings = handyClient.getSliderSettings();
+            log.info("Intiface does not support a stroke range: using the full stroke of the device");
         }
-        catch (RuntimeException e)
-        {
-            log.warn("Could not read the stroke range from the device, assuming a {} mm stroke: {}", DEFAULT_STROKE_MM,
-                    e.getMessage());
-        }
-        sliderSettings.ifPresent(s -> log.info("Slider settings min={}, max={}", s.min(), s.max()));
         // The minimum speed is a property of the device (mm/s), the moves are planned in units of the stroke zone
         Float strokeMm = sliderSettings.map(SliderSettingsResult::strokeMm).orElse(null);
         this.minSliderSpeed = minSliderSpeedMmPerSecond / (strokeMm != null ? strokeMm : DEFAULT_STROKE_MM);
@@ -537,10 +546,21 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         {
             log.info("HDSP_SMOOTHED: maxSliderSpeed=no limit");
         }
-        readInitialSliderPosition(sliderSettings.orElse(null));
+        if (handyClient.supportsSliderState())
+        {
+            readInitialSliderPosition(sliderSettings.orElse(null));
+        }
         if (config.hdspLogDevicePosition())
         {
-            startDevicePositionLog();
+            if (handyClient.supportsSliderState())
+            {
+                startDevicePositionLog();
+            }
+            else
+            {
+                log.info("Device position logging is not available through Intiface: the device does not report its"
+                        + " position there");
+            }
         }
     }
 

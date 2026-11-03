@@ -21,6 +21,12 @@ public record ConfigProperties(
         ConnectionType connection,
         // WebSocket address of the Intiface Central server, only used with the INTIFACE connection
         String intifaceAddress,
+        // Intiface device index of the selected device, -1 for the first usable one. The index is what makes the
+        // selection unambiguous: several devices can share the same device name (for example two simulated ones).
+        Integer intifaceDeviceIndex,
+        // Display label of the selected Intiface device (for example 'MyTest1 (Simulated Stroker)'), blank for the
+        // first usable one. Kept so that the choice can be shown while the device is not connected.
+        String intifaceDeviceName,
         SpsType spsType,
         // Whose contacts move the device, selects the default avatar parameter
         InteractWith interactWith,
@@ -84,6 +90,8 @@ public record ConfigProperties(
         return ConfigProperties.builder()
                 .connection(ConnectionType.DIRECT)
                 .intifaceAddress(DEFAULT_INTIFACE_ADDRESS)
+                .intifaceDeviceIndex(-1)
+                .intifaceDeviceName("")
                 .spsType(SpsType.PENETRATOR)
                 .interactWith(InteractWith.OTHERS)
                 .processingAlgorithm(ParameterProcessorType.HDSP_SMOOTHED)

@@ -64,7 +64,8 @@ public class MainWindow
                 gauge::setValue);
         this.status = controller.getStatus();
         this.settings = new SettingsPanel(config, this::onSettingsChanged,
-                () -> controller.runStepResponseCalibration(effectiveConfig()));
+                () -> controller.runStepResponseCalibration(effectiveConfig()),
+                controller::discoverIntifaceDevices);
         this.saveTimer = new Timer(SAVE_DELAY_MS, e -> saveSettings());
         saveTimer.setRepeats(false);
     }

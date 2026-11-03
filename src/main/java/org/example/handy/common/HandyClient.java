@@ -23,13 +23,32 @@ public abstract class HandyClient implements AutoCloseable
     public abstract Optional<SliderSettingsResult> getSliderSettings();
 
     /**
+     * @return true when the connection can apply and read the stroke range on the device itself. Intiface cannot
+     * (Buttplug has no stroke zone), so the stroke range setting is not used there.
+     */
+    public boolean supportsSliderSettings()
+    {
+        return true;
+    }
+
+    /**
+     * @return true when the connected device can report its position. Only the direct Bluetooth connection can;
+     * the device position log is not available through Intiface.
+     */
+    public boolean supportsSliderState()
+    {
+        return true;
+    }
+
+    /**
      * HDSP (Handy Direct Streaming Protocol): moves the slider to the given position using the given duration
      * (in ms) for the move.
      * <p>
      * The position is the normalized HDSP position in the 0.0-1.0 range of the configured stroke zone, which is
      * the unit the device protocol uses. The HDSP processor converts the percentage positions used in the rest
      * of the app before calling this, so an implementation only has to translate the command into its own wire
-     * format (the BLE protocol takes the position as it is, Intiface sends it as a Buttplug LinearCmd).
+     * format (the BLE protocol takes the position as it is, Intiface sends it as a Buttplug
+     * {@code HwPositionWithDuration} command).
      * <p>
      * The default implementation rejects it.
      *
