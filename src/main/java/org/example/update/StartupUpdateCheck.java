@@ -1,5 +1,6 @@
 package org.example.update;
 
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
 
@@ -11,12 +12,9 @@ import java.util.Optional;
  * alive at shutdown.
  */
 @Slf4j
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class StartupUpdateCheck
 {
-    private StartupUpdateCheck()
-    {
-    }
-
     public static void runIfEnabled(ConfigProperties config)
     {
         runIfEnabled(config, new UpdateChecker());

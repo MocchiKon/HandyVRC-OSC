@@ -1,5 +1,6 @@
 package org.example.gui;
 
+import lombok.Getter;
 import org.example.config.ConfigProperties;
 import org.example.config.ConnectionType;
 import org.example.config.InteractWith;
@@ -49,11 +50,14 @@ public class SettingsPanel extends JPanel
     private static final int SETTING_LOG_DELAY_MS = 350;
     private static final String CALIBRATION_TOOLTIP = "Sends known full-stroke and short slow moves, records the"
             + " device response in logs/diagnostics/ and writes the profile to profiles/. Takes about four minutes,"
-            + " needs a direct Bluetooth connection, and temporarily stops the running session. The measured limits"
+            + " needs a Bluetooth connection, and temporarily stops the running session. The measured limits"
             + " are used automatically afterwards.";
-    private static final String CALIBRATION_INTIFACE_TOOLTIP = "Calibration needs a Direct Bluetooth connection:"
-            + " Intiface cannot report the slider position. Change Connection to Direct on the Basic tab.";
+    private static final String CALIBRATION_INTIFACE_TOOLTIP = "Calibration needs a Bluetooth connection:"
+            + " Intiface cannot report the slider position. Change Connection to Bluetooth on the Basic tab.";
+    private static final String CALIBRATION_WIFI_TOOLTIP = "Calibration is only available with the Bluetooth"
+            + " connection. Change Connection to Bluetooth on the Basic tab.";
 
+    @Getter
     private ConfigProperties config;
     /** The settings as they were when the last change was logged, used to find what changed. */
     private ConfigProperties loggedConfig;
@@ -69,6 +73,14 @@ public class SettingsPanel extends JPanel
     // Basic
     private final SegmentedControl<ConnectionType> connection;
     private final WrappingText connectionHint = new WrappingText("", Theme.regular(12f), Theme.TEXT_MUTED);
+    private final ModernTextField connectionKey = new ModernTextField("", 24);
+    private final WrappingText connectionKeyHint = new WrappingText(
+            "Open the Handy app (or handyfeeling.com), connect the Handy to Wi-Fi and copy the connection key"
+                    + " shown there.", Theme.regular(11.5f), Theme.TEXT_MUTED);
+    private final WrappingText connectionKeyError = new WrappingText("", Theme.regular(12f), Theme.ERROR);
+    private JPanel connectionKeyRow;
+    private final ModernTextField handyApplicationId = new ModernTextField("", 32);
+    private JPanel handyApplicationIdRow;
     private final ModernTextField intifaceAddress = new ModernTextField("", 20);
     private final WrappingText intifaceAddressError = new WrappingText("", Theme.regular(12f), Theme.ERROR);
     private JPanel intifaceAddressRow;
@@ -77,9 +89,7 @@ public class SettingsPanel extends JPanel
     private final WrappingText intifaceDeviceHint = new WrappingText("", Theme.regular(12f), Theme.TEXT_MUTED);
     private JPanel intifaceDeviceRow;
     private final WrappingText handyIntifaceWarning = new WrappingText(
-            "Direct connection is strongly recommended for The Handy. When using Intiface the"
-                    + " stroke range setting is ignored (the device keeps its full stroke), stop-on-target does not"
-                    + " work, and slider movement will not be as good.", Theme.regular(12f), Theme.WARNING);
+            IntifaceDeviceConnector.HANDY_WARNING, Theme.regular(12f), Theme.WARNING);
     private JComponent handyIntifaceWarningRow;
     /** Devices the last Refresh found, used to build the choices without losing the selected one. */
     private List<ButtplugConnection.Device> discoveredIntifaceDevices = List.of();
@@ -165,6 +175,10 @@ public class SettingsPanel extends JPanel
                 new SegmentedControl.Option<>(ConnectionType.DIRECT, ConnectionType.DIRECT.getLabel(),
                         "Recommended. The app connects to your Handy over Bluetooth itself. Lowest latency, and the"
                                 + " stroke range is set on the device."),
+                new SegmentedControl.Option<>(ConnectionType.WIFI, ConnectionType.WIFI.getLabel(),
+                        "The app connects to your Handy through the Handy servers over the internet. The Handy has"
+                                + " to be connected to Wi-Fi. Enter the connection key from the Handy app; the"
+                                + " application ID only has to be changed when you were given a different one."),
                 new SegmentedControl.Option<>(ConnectionType.INTIFACE, ConnectionType.INTIFACE.getLabel(),
                         "The app sends the movement to Intiface Central, which connects to the device. Start"
                                 + " Intiface Central and its server before pressing Start. Other strokers Intiface"
@@ -229,11 +243,6 @@ public class SettingsPanel extends JPanel
         }
     }
 
-    public ConfigProperties getConfig()
-    {
-        return config;
-    }
-
     /** Shows the given settings without reporting them as a change. */
     public void setConfig(ConfigProperties newConfig)
     {
@@ -243,6 +252,10 @@ public class SettingsPanel extends JPanel
         try
         {
             connection.setSelected(newConfig.connection());
+            connectionKey.setText(orDefault(newConfig.connectionKey(), ""));
+            connectionKey.setCaretPosition(0);
+            handyApplicationId.setText(newConfig.effectiveHandyApplicationId());
+            handyApplicationId.setCaretPosition(0);
             intifaceAddress.setText(newConfig.intifaceAddress());
             intifaceAddress.setCaretPosition(0);
             updateIntifaceDeviceChoices(newConfig.intifaceDeviceIndex(), newConfig.intifaceDeviceName());
@@ -346,8 +359,15 @@ public class SettingsPanel extends JPanel
                 Object newValue = component.getAccessor().invoke(after);
                 if (!Objects.equals(oldValue, newValue))
                 {
-                    log.info("{}: {} = {} (was {})", prefix, component.getName(), settingValue(newValue),
-                            settingValue(oldValue));
+                    String oldText = settingValue(component.getName(), oldValue);
+                    String newText = settingValue(component.getName(), newValue);
+                    if (isSecret(component.getName()) && oldText.equals(newText))
+                    {
+                        // Only the hidden part changed (for example while the user is still typing the key):
+                        // logging it would add nothing and would reveal how often the secret was edited.
+                        continue;
+                    }
+                    log.info("{}: {} = {} (was {})", prefix, component.getName(), newText, oldText);
                 }
             }
             catch (ReflectiveOperationException e)
@@ -357,7 +377,7 @@ public class SettingsPanel extends JPanel
         }
     }
 
-    private static String settingValue(Object value)
+    private static String settingValue(String name, Object value)
     {
         if (value == null)
         {
@@ -365,18 +385,45 @@ public class SettingsPanel extends JPanel
         }
         if (value instanceof String text)
         {
-            return text.isBlank() ? "(empty)" : text;
+            if (text.isBlank())
+            {
+                return "(empty)";
+            }
+            return isSecret(name) ? ConfigProperties.maskSecret(text) : text;
         }
         return String.valueOf(value);
+    }
+
+    private static boolean isSecret(String name)
+    {
+        return name.equals("connectionKey") || name.equals("handyApplicationId");
     }
 
     /** Updates everything that depends on other settings (visible options, defaults, validation). */
     private void refreshDependentControls()
     {
-        boolean intiface = config.connection() == ConnectionType.INTIFACE;
-        connectionHint.setText(intiface
-                ? "Start Intiface Central and its server, connect your device there, and pick it below."
-                : "Recommended: connects to your Handy over Bluetooth.");
+        ConnectionType connectionType = config.connection() == null ? ConnectionType.DIRECT : config.connection();
+        boolean intiface = connectionType == ConnectionType.INTIFACE;
+        boolean wifi = connectionType == ConnectionType.WIFI;
+        connectionHint.setText(switch (connectionType)
+        {
+            case WIFI -> "Connects through the Handy servers. The Handy has to be online there; enter the connection"
+                    + " key from the Handy app.";
+            case INTIFACE -> "Start Intiface Central and its server, connect your device there, and pick it below.";
+            case DIRECT -> "Recommended: connects to your Handy over Bluetooth.";
+        });
+        if (connectionKeyRow != null)
+        {
+            connectionKeyRow.setVisible(wifi);
+        }
+        if (handyApplicationIdRow != null)
+        {
+            handyApplicationIdRow.setVisible(wifi);
+        }
+        String keyError = wifi ? ConfigProperties.validateConnectionKey(config.connectionKey()) : null;
+        this.connectionKeyError.setText(keyError == null ? "" : keyError);
+        this.connectionKeyError.setVisible(keyError != null);
+        connectionKey.setInvalid(keyError != null);
         intifaceAddressRow.setVisible(intiface);
         if (intifaceDeviceRow != null)
         {
@@ -429,26 +476,28 @@ public class SettingsPanel extends JPanel
     /**
      * Intiface Central can only send positions: Buttplug has no stroke zone, cannot read the device position, and
      * does not honor stop-on-target. The settings that need those features are disabled there instead of silently
-     * doing nothing (the old code even applied the stroke range by shrinking every position in the app).
+     * doing nothing (the old code even applied the stroke range by shrinking every position in the app). Bluetooth
+     * and Wi-Fi both support them.
      */
     private void updateIntifaceControlAvailability()
     {
-        boolean direct = config.connection() != ConnectionType.INTIFACE;
-        strokeRange.setEnabled(direct);
-        pauseOnStarving.setEnabled(direct);
-        logDevicePosition.setEnabled(direct);
-        deviceLogInterval.setEnabled(direct);
+        boolean supportsDeviceFeatures = config.connection() != ConnectionType.INTIFACE;
+        strokeRange.setEnabled(supportsDeviceFeatures);
+        pauseOnStarving.setEnabled(supportsDeviceFeatures);
+        logDevicePosition.setEnabled(supportsDeviceFeatures);
+        deviceLogInterval.setEnabled(supportsDeviceFeatures);
     }
 
-    /** Warns that Intiface cannot provide the Handy-specific features, so Direct is the better choice. */
+    /** Warns that Intiface cannot provide the Handy-specific features, so Bluetooth is the better choice. */
     private void updateHandyIntifaceWarning()
     {
         if (handyIntifaceWarningRow == null)
         {
             return;
         }
+        DeviceChoice selected = intifaceDevice.getSelectedItem() instanceof DeviceChoice choice ? choice : null;
         boolean visible = config.connection() == ConnectionType.INTIFACE
-                && IntifaceDeviceConnector.isHandy(config.intifaceDeviceName());
+                && selected != null && IntifaceDeviceConnector.isHandy(selected.name());
         if (handyIntifaceWarningRow.isVisible() == visible)
         {
             return;
@@ -465,8 +514,8 @@ public class SettingsPanel extends JPanel
     /**
      * Rebuilds the device choices from the devices found by the last Refresh. Every device gets its own entry, even
      * when several report the same device name (two simulated strokers do): the Intiface index is what the choice
-     * stores, because names are not unique. The selected device is kept even when it is not connected at the moment,
-     * so that starting later still uses it.
+     * stores, because names are not unique. The saved display label is kept so that the selected device remains in
+     * the list, marked as not connected, while it is absent from Intiface Central.
      */
     private void updateIntifaceDeviceChoices(Integer selectedDeviceIndex, String selectedDeviceName)
     {
@@ -485,14 +534,12 @@ public class SettingsPanel extends JPanel
             {
                 intifaceDevice.addItem(new DeviceChoice(device.index(), device.displayLabel()));
             }
-            // A setting written by an older version has no index: find the device by its old name/display label.
             int resolvedIndex = selectableIndex(usable, wantedIndex, selected);
-            if (resolvedIndex < 0 && !selected.isEmpty())
+            if (resolvedIndex < 0 && wantedIndex >= 0 && !selected.isEmpty())
             {
-                // Not connected now: keep it in the list so that the saved choice is not silently forgotten.
                 intifaceDevice.addItem(new DeviceChoice(wantedIndex, selected, selected + " (not connected)"));
             }
-            selectIntifaceDevice(resolvedIndex, selected);
+            selectIntifaceDevice(resolvedIndex >= 0 ? resolvedIndex : wantedIndex);
         }
         finally
         {
@@ -501,21 +548,24 @@ public class SettingsPanel extends JPanel
         updateHandyIntifaceWarning();
     }
 
-    /** @return the index of the device that belongs to the saved setting, or -1 when it is not connected */
+    /**
+     * @return the index of the device that belongs to the saved setting, or -1 when it is not connected. The saved
+     * display label also finds the device after Intiface gave it a new index; a name without an index belongs to
+     * "first available device" and is not matched.
+     */
     private int selectableIndex(List<ButtplugConnection.Device> usable, int wantedIndex, String selected)
     {
+        if (wantedIndex < 0)
+        {
+            return -1;
+        }
         if (!selected.isEmpty())
         {
-            // The display label is what new settings store; the device name covers settings from older versions.
-            // It wins over the index because the Intiface index can change when a device reconnects.
-            if (wantedIndex >= 0)
+            for (ButtplugConnection.Device device : usable)
             {
-                for (ButtplugConnection.Device device : usable)
+                if (device.index() == wantedIndex && matchesName(device, selected))
                 {
-                    if (device.index() == wantedIndex && matchesName(device, selected))
-                    {
-                        return wantedIndex;
-                    }
+                    return wantedIndex;
                 }
             }
             for (ButtplugConnection.Device device : usable)
@@ -526,14 +576,11 @@ public class SettingsPanel extends JPanel
                 }
             }
         }
-        if (wantedIndex >= 0)
+        for (ButtplugConnection.Device device : usable)
         {
-            for (ButtplugConnection.Device device : usable)
+            if (device.index() == wantedIndex)
             {
-                if (device.index() == wantedIndex)
-                {
-                    return wantedIndex;
-                }
+                return wantedIndex;
             }
         }
         return -1;
@@ -545,45 +592,17 @@ public class SettingsPanel extends JPanel
                 && (device.displayLabel().equalsIgnoreCase(name) || device.name().equalsIgnoreCase(name));
     }
 
-    private void selectIntifaceDevice(int resolvedIndex, String selectedName)
+    private void selectIntifaceDevice(int wantedIndex)
     {
-        int target = -1;
-        if (resolvedIndex >= 0)
+        for (int i = 0; i < intifaceDevice.getItemCount(); i++)
         {
-            for (int i = 0; i < intifaceDevice.getItemCount(); i++)
+            if (intifaceDevice.getItemAt(i).index() == wantedIndex)
             {
-                if (intifaceDevice.getItemAt(i).index() == resolvedIndex)
-                {
-                    target = i;
-                    break;
-                }
+                intifaceDevice.setSelectedIndex(i);
+                return;
             }
         }
-        else if (!selectedName.isEmpty())
-        {
-            String disconnected = selectedName + " (not connected)";
-            for (int i = 0; i < intifaceDevice.getItemCount(); i++)
-            {
-                if (intifaceDevice.getItemAt(i).label().equalsIgnoreCase(disconnected))
-                {
-                    target = i;
-                    break;
-                }
-            }
-        }
-        intifaceDevice.setSelectedIndex(target >= 0 ? target : 0);
-    }
-
-    /** @return true when this device is (or would be used as) the one saved in the settings */
-    private static boolean isSelectedDevice(ButtplugConnection.Device device, Integer selectedDeviceIndex,
-                                            String selectedDeviceName)
-    {
-        String selected = selectedDeviceName == null ? "" : selectedDeviceName.trim();
-        if (matchesName(device, selected))
-        {
-            return true;
-        }
-        return selectedDeviceIndex != null && selectedDeviceIndex >= 0 && device.index() == selectedDeviceIndex;
+        intifaceDevice.setSelectedIndex(0);
     }
 
     /** Reads the devices Intiface Central knows without blocking the GUI. */
@@ -656,10 +675,10 @@ public class SettingsPanel extends JPanel
                     + " Intiface Central and press Refresh.", Theme.WARNING);
             return;
         }
-        String selected = config.intifaceDeviceName() == null ? "" : config.intifaceDeviceName().trim();
-        boolean connected = usable.stream()
-                .anyMatch(device -> isSelectedDevice(device, config.intifaceDeviceIndex(), selected));
-        if (!selected.isEmpty() && !connected)
+        int selectedIndex = config.intifaceDeviceIndex() == null ? -1 : config.intifaceDeviceIndex();
+        String selectedName = config.intifaceDeviceName() == null ? "" : config.intifaceDeviceName().trim();
+        boolean connected = selectedIndex < 0 || selectableIndex(usable, selectedIndex, selectedName) >= 0;
+        if (selectedIndex >= 0 && !connected)
         {
             showIntifaceDeviceHint("The selected device is not connected to Intiface Central. Connect it there and"
                     + " press Refresh, or choose another device.", Theme.WARNING);
@@ -695,7 +714,14 @@ public class SettingsPanel extends JPanel
                 // The list is only useful while Intiface is selected; refresh it as soon as the row appears.
                 refreshIntifaceDevices();
             }
+            else if (value == ConnectionType.WIFI)
+            {
+                SwingUtilities.invokeLater(connectionKey::requestFocusInWindow);
+            }
         });
+        onTextChange(connectionKey, () -> update(b -> b.connectionKey(connectionKey.getText().trim())));
+        onTextChange(handyApplicationId,
+                () -> update(b -> b.handyApplicationId(handyApplicationId.getText().trim())));
         onTextChange(intifaceAddress, () -> update(b -> b.intifaceAddress(intifaceAddress.getText().trim())));
         intifaceDevice.addActionListener(e ->
         {
@@ -826,6 +852,44 @@ public class SettingsPanel extends JPanel
         }
         applyTooltip(connectionRow, Theme.tooltip("How the app reaches your device.\n\n" + connection.describeOptions()));
         addRow(device, connectionRow);
+
+        connectionKey.setFont(Theme.font(Font.PLAIN, 12.5f));
+        connectionKeyError.setVisible(false);
+        // The row brings its own gap instead of using addRow, so that nothing is left over while it is hidden
+        connectionKeyRow = verticalRow();
+        connectionKeyRow.add(Box.createVerticalStrut(12));
+        connectionKeyRow.add(title("Connection key"));
+        connectionKeyRow.add(Box.createVerticalStrut(8));
+        connectionKeyRow.add(connectionKey);
+        connectionKeyRow.add(Box.createVerticalStrut(6));
+        connectionKeyRow.add(connectionKeyHint);
+        connectionKeyRow.add(Box.createVerticalStrut(4));
+        connectionKeyRow.add(connectionKeyError);
+        for (Component component : connectionKeyRow.getComponents())
+        {
+            ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        applyTooltip(connectionKeyRow, Theme.tooltip("The connection key of your Handy, shown in the Handy app (or"
+                + " on handyfeeling.com) while the Handy is connected to Wi-Fi. The Bluetooth and Intiface"
+                + " connections do not need it."));
+        connectionKeyRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        device.add(connectionKeyRow);
+
+        handyApplicationId.setFont(Theme.font(Font.PLAIN, 12.5f));
+        handyApplicationIdRow = verticalRow();
+        handyApplicationIdRow.add(Box.createVerticalStrut(12));
+        handyApplicationIdRow.add(title("Application ID"));
+        handyApplicationIdRow.add(Box.createVerticalStrut(8));
+        handyApplicationIdRow.add(handyApplicationId);
+        for (Component component : handyApplicationIdRow.getComponents())
+        {
+            ((JComponent) component).setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        applyTooltip(handyApplicationIdRow, Theme.tooltip("Application ID (API key) used to authenticate with the"
+                + " Handy servers. The default is the one issued for this app, you can bring your own if this one gets throttled."));
+        handyApplicationIdRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        device.add(handyApplicationIdRow);
+
         intifaceAddress.setFont(Theme.font(Font.PLAIN, 12.5f));
         intifaceAddressError.setVisible(false);
         // The row brings its own gap instead of using addRow, so that nothing is left over while it is hidden
@@ -959,6 +1023,8 @@ public class SettingsPanel extends JPanel
         page.add(Box.createVerticalStrut(12));
         page.add(restoreDefaultsButton(defaults -> config.toBuilder()
                 .connection(defaults.connection())
+                .connectionKey(defaults.connectionKey())
+                .handyApplicationId(defaults.handyApplicationId())
                 .intifaceAddress(defaults.intifaceAddress())
                 .intifaceDeviceIndex(defaults.intifaceDeviceIndex())
                 .intifaceDeviceName(defaults.intifaceDeviceName())
@@ -1034,14 +1100,14 @@ public class SettingsPanel extends JPanel
         addRow(smoothedSection, toggleRow("Log device position", "Diagnostics, leave off for normal use",
                 "Logs the position the device reports (log level DEBUG) next to the position the app believes it"
                         + " is at, with the active move and the newest input value. Every report is an extra device"
-                        + " request. Needs a Direct connection: devices driven through Intiface cannot report their"
-                        + " position.",
+                        + " request. Needs a Bluetooth or Wi-Fi connection: devices driven through Intiface cannot"
+                        + " report their position.",
                 logDevicePosition));
         deviceLogIntervalRow = sliderRow("Device log interval",
-                "How often the device position is read while logging. Each read is a Bluetooth round trip (about"
-                        + " 100 ms), so the time between two samples is this interval plus that round trip. A short"
-                        + " interval adds traffic and can delay the movement commands; use 50 ms only for a short"
-                        + " diagnostic run. 200 ms is the normal setting.",
+                "How often the device position is read while logging. Each read is a device round trip (about"
+                        + " 100 ms over Bluetooth, longer over Wi-Fi), so the time between two samples is this"
+                        + " interval plus that round trip. A short interval adds traffic and can delay the movement"
+                        + " commands; use 50 ms only for a short diagnostic run. 200 ms is the normal setting.",
                 deviceLogInterval, value -> value + " ms");
         deviceLogIntervalSpacer = addRow(smoothedSection, deviceLogIntervalRow);
         diagnosticTraceRow = toggleRow("Write diagnostic trace", "Structured data for analysis",
@@ -1205,9 +1271,11 @@ public class SettingsPanel extends JPanel
         }
         boolean visible = config.processingAlgorithm() == ParameterProcessorType.HDSP_SMOOTHED
                 && config.hdspUseDeviceProfile();
-        boolean direct = config.connection() == ConnectionType.DIRECT;
-        String tooltip = Theme.tooltip(direct ? CALIBRATION_TOOLTIP : CALIBRATION_INTIFACE_TOOLTIP);
-        calibrateButton.setEnabled(direct);
+        ConnectionType connectionType = config.connection() == null ? ConnectionType.DIRECT : config.connection();
+        boolean bluetooth = connectionType == ConnectionType.DIRECT;
+        String tooltip = Theme.tooltip(bluetooth ? CALIBRATION_TOOLTIP
+                : connectionType == ConnectionType.WIFI ? CALIBRATION_WIFI_TOOLTIP : CALIBRATION_INTIFACE_TOOLTIP);
+        calibrateButton.setEnabled(bluetooth);
         calibrateButton.setToolTipText(tooltip);
         applyTooltip(calibrateButtonRow, tooltip);
         boolean changed = setRowVisible(calibrateButtonRow, calibrateButtonSpacer, visible);
@@ -1324,7 +1392,8 @@ public class SettingsPanel extends JPanel
 
     /**
      * One entry of the Intiface device dropdown. The index identifies the device (device names are not unique); the
-     * name is the display label saved alongside it, so that the choice can be shown while it is not connected.
+     * name is the saved display label, and the label is what the user sees (the name plus "(not connected)" while the
+     * device is absent from Intiface Central).
      */
     private record DeviceChoice(int index, String name, String label)
     {

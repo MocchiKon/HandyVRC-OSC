@@ -14,9 +14,6 @@
             <destName>${project.artifactId}.jar</destName>
         </file>
         <file>
-            <source>${project.build.directory}/release/app.properties</source>
-        </file>
-        <file>
             <source>src/main/packaging/start.sh</source>
             <fileMode>0755</fileMode>
             <lineEnding>unix</lineEnding>
@@ -29,4 +26,13 @@
             <source>LICENSE</source>
         </file>
     </files>
+    <fileSets>
+        <fileSet>
+            <directory>${project.build.directory}/release</directory>
+            <outputDirectory>.</outputDirectory>
+            <includes>
+                <include>app.properties</include>
+            </includes>
+        </fileSet>
+    </fileSets>
 </assembly>

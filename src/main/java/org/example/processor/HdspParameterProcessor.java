@@ -114,13 +114,6 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
             return sendNewestPoint(now);
         }
 
-        // No points waiting: when the input goes quiet, tell the device to stop at the last known position.
-        // Commented out because it makes slider bounce back too much
-        // if (shouldStopForIdle(now))
-        // {
-        //     sendIdleStop();
-        //     return now;
-        // }
         return lastMessageSentMs;
     }
 
@@ -138,23 +131,6 @@ public class HdspParameterProcessor extends AbstractStreamingParameterProcessor
         lastPointActivityMs = now;
         stopped = false;
         return now;
-    }
-
-    private boolean shouldStopForIdle(long now)
-    {
-        // lastPointActivityMs is refreshed when a point is generated and when a movement is sent
-        return !stopped
-                && lastSentPoint != null
-                && (now - lastPointActivityMs) >= HDSP_IDLE_STOP_TIMEOUT_MS;
-    }
-
-    private void sendIdleStop()
-    {
-        int durationMs = clampDuration(getSendIntervalMs());
-        log.debug("[HDSP] No new points for {}ms, stopping at last known position {}%",
-                HDSP_IDLE_STOP_TIMEOUT_MS, lastSentPoint.x());
-        sendHdspMove(lastSentPoint, durationMs, true);
-        stopped = true;
     }
 
     /**

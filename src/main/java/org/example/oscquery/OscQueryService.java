@@ -10,6 +10,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -211,11 +212,7 @@ public class OscQueryService implements Closeable
 
     private static List<InetAddress> collectAddresses(ServiceInfo info)
     {
-        List<InetAddress> addresses = new ArrayList<>();
-        for (Inet4Address address : info.getInet4Addresses())
-        {
-            addresses.add(address);
-        }
+        List<InetAddress> addresses = new ArrayList<>(Arrays.asList(info.getInet4Addresses()));
         for (InetAddress address : info.getInetAddresses())
         {
             if (!(address instanceof Inet4Address))

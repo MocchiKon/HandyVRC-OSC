@@ -1,5 +1,7 @@
 package org.example.gui;
 
+import lombok.Getter;
+
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
@@ -32,6 +34,8 @@ public class ModernSlider extends JComponent
     private int low;
     private int high;
     private boolean lowActive;
+
+    @Getter
     private boolean dragging;
     private final List<Runnable> commitListeners = new ArrayList<>();
     private int hoverThumb = -1; // -1 none, 0 low, 1 high
@@ -134,12 +138,6 @@ public class ModernSlider extends JComponent
         commitListeners.add(listener);
     }
 
-    /** @return true while the user holds the mouse button on this slider */
-    public boolean isDragging()
-    {
-        return dragging;
-    }
-
     private void fireCommit()
     {
         for (Runnable listener : List.copyOf(commitListeners))
@@ -159,7 +157,7 @@ public class ModernSlider extends JComponent
 
     private int snap(int value)
     {
-        return Math.clamp(min + Math.round((value - min) / (float) step) * step, min, max);
+        return Math.clamp(min + (long) Math.round((value - min) / (float) step) * step, min, max);
     }
 
     @Override

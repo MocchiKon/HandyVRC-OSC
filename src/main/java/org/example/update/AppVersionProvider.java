@@ -1,5 +1,6 @@
 package org.example.update;
 
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -12,14 +13,11 @@ import java.util.Properties;
  * when that resource is missing or unreadable, the version stored in the JAR manifest is used instead.
  */
 @Slf4j
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class AppVersionProvider
 {
     static final String VERSION_RESOURCE = "/version.properties";
     static final String VERSION_PROPERTY = "version";
-
-    private AppVersionProvider()
-    {
-    }
 
     /**
      * @return the version of this build, or an empty optional when it cannot be determined

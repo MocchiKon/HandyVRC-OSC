@@ -1,5 +1,6 @@
 package org.example.oscquery;
 
+import lombok.NoArgsConstructor;
 import org.example.OscAddressPattern;
 
 import java.util.*;
@@ -18,6 +19,7 @@ import java.util.regex.Pattern;
  *     for example {@code /avatar/parameters/OGB/Pen/1/PenOthers}) used in PENETRATOR mode.</li>
  * </ul>
  */
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class SpsParameterDetector
 {
     public static final String NEW_ROOT_SUFFIX = "NewRoot";
@@ -27,10 +29,6 @@ public final class SpsParameterDetector
     private static final Pattern PENETRATOR_PARAMETER = Pattern.compile(".*/(PenOthers|PenSelf)$");
     /** Parameters that look SPS related but are neither a proximity pair nor a penetration amount. */
     private static final Pattern OTHER_SPS_PARAMETER = Pattern.compile("(?i).*(pen|orf|sps).*");
-
-    private SpsParameterDetector()
-    {
-    }
 
     /**
      * @param nodes all nodes that VRChat exposes below {@code /avatar/parameters}

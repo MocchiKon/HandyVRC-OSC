@@ -1,5 +1,7 @@
 package org.example.gui;
 
+import lombok.NoArgsConstructor;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyEvent;
@@ -11,12 +13,9 @@ import java.util.Arrays;
  * Tells the user that a newer version was released, styled like the rest of the GUI (the stock option pane cannot
  * be themed properly: its Metal buttons ignore the dark colors).
  */
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class UpdateDialog
 {
-    private UpdateDialog()
-    {
-    }
-
     /**
      * Shows the dialog and waits until it is closed; has to be called on the event dispatch thread.
      *

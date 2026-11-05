@@ -367,6 +367,87 @@ class ConfigLoaderTest
     }
 
     @Test
+    void connectionModesAreOrderedAsShownInTheGui()
+    {
+        assertThat(ConnectionType.values()).containsExactly(ConnectionType.DIRECT, ConnectionType.WIFI,
+                ConnectionType.INTIFACE);
+        assertThat(ConnectionType.DIRECT.getLabel()).isEqualTo("Bluetooth");
+        assertThat(ConnectionType.WIFI.getLabel()).isEqualTo("Wi-Fi");
+        assertThat(ConnectionType.INTIFACE.getLabel()).isEqualTo("Intiface");
+        // The config value stays DIRECT so that app.properties written by older versions keeps working.
+        assertThat(ConnectionType.DIRECT.name()).isEqualTo("DIRECT");
+    }
+
+    @Test
+    void loadsWifiConnectionWithItsSecrets() throws IOException
+    {
+        var config = loadConfig("""
+                connection=WIFI
+                connectionKey=AbC12345
+                handyApplicationId=custom_application-id
+                """);
+
+        assertThat(config.connection()).isEqualTo(ConnectionType.WIFI);
+        assertThat(config.connectionKey()).isEqualTo("AbC12345");
+        assertThat(config.handyApplicationId()).isEqualTo("custom_application-id");
+        assertThat(config.validate()).isNull();
+    }
+
+    @Test
+    void wifiConnectionRequiresAConnectionKey() throws IOException
+    {
+        assertThat(loadConfig("connection=WIFI").validate()).contains("connection key is required");
+        assertThat(loadConfig("connection=WIFI\nconnectionKey=too short").validate()).contains("not valid");
+        assertThat(loadConfig("connection=WIFI\nconnectionKey=AbC12345").validate()).isNull();
+    }
+
+    @Test
+    void blankApplicationIdFallsBackToTheDefault()
+    {
+        var config = ConfigProperties.defaults().toBuilder()
+                .connection(ConnectionType.WIFI)
+                .connectionKey("AbC12345")
+                .handyApplicationId(" ")
+                .build();
+
+        assertThat(config.validate()).isNull();
+        assertThat(config.effectiveHandyApplicationId()).isEqualTo(ConfigProperties.DEFAULT_HANDY_APPLICATION_ID);
+    }
+
+    @Test
+    void blankValuesInTheFileFallBackToTheirDefaults() throws IOException
+    {
+        var config = loadConfig("connection=WIFI\nconnectionKey=AbC12345\nhandyApplicationId=");
+
+        assertThat(config.handyApplicationId()).isEqualTo(ConfigProperties.DEFAULT_HANDY_APPLICATION_ID);
+        assertThat(config.effectiveHandyApplicationId()).isEqualTo(ConfigProperties.DEFAULT_HANDY_APPLICATION_ID);
+        assertThat(config.validate()).isNull();
+    }
+
+    @Test
+    void handyApplicationIdDefaultsToTheOneIssuedForTheApp() throws IOException
+    {
+        var config = loadConfig("spsType=PENETRATOR");
+
+        assertThat(config.handyApplicationId()).isEqualTo(ConfigProperties.DEFAULT_HANDY_APPLICATION_ID);
+        assertThat(config.connectionKey()).isEmpty();
+    }
+
+    @Test
+    void theConnectionKeyIsNotLoggedInClearText()
+    {
+        var config = ConfigProperties.defaults().toBuilder()
+                .connection(ConnectionType.WIFI)
+                .connectionKey("AbC12345")
+                .build();
+
+        assertThat(config.toLoggableString())
+                .doesNotContain("AbC12345")
+                .doesNotContain("Ab***45")
+                .contains("connectionKey=Ab***");
+    }
+
+    @Test
     void readsIntifaceConnection() throws IOException
     {
         var config = loadConfig("""
@@ -436,6 +517,26 @@ class ConfigLoaderTest
         assertThat(reread.intifaceAddress()).isEqualTo("ws://localhost:1234");
         assertThat(reread.intifaceDeviceIndex()).isEqualTo(3);
         assertThat(reread.intifaceDeviceName()).isEqualTo("MyTest1 (Simulated Stroker)");
+    }
+
+    @Test
+    void writesAndReadsBackTheWifiConnection() throws IOException
+    {
+        var config = ConfigProperties.defaults().toBuilder()
+                .connection(ConnectionType.WIFI)
+                .connectionKey("AbC12345")
+                .handyApplicationId("custom_application-id")
+                .build();
+
+        String formatted = ConfigLoader.format(config);
+        var reread = loadConfig(formatted);
+
+        assertThat(formatted).contains("connectionKey=AbC12345");
+        assertThat(formatted).contains("handyApplicationId=custom_application-id");
+        assertThat(reread.connection()).isEqualTo(ConnectionType.WIFI);
+        assertThat(reread.connectionKey()).isEqualTo("AbC12345");
+        assertThat(reread.handyApplicationId()).isEqualTo("custom_application-id");
+        assertThat(reread).isEqualTo(config);
     }
 
     private ConfigProperties loadConfig(String configContent) throws IOException

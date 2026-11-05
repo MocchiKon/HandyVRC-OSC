@@ -410,12 +410,6 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
     private long receivedSamples;
 
     // Tests only
-    HdspSmoothedParameterProcessor(ConfigProperties config)
-    {
-        this(null, config);
-    }
-
-    // Tests only
     void setMotionStartMsForTest(double motionStartMs)
     {
         this.motionStartMs = motionStartMs;
@@ -459,7 +453,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         // A device that can move at 1 mm/s is also worth following at 1 mm/s. The default 4%/s only exists to reject
         // the jitter of a tracked hand; a calibrated slow device lowers it, but never below half a percent per second.
         this.minInputSpeedPercentPerSecond = deviceProfile == null ? MIN_INPUT_SPEED_PERCENT_PER_SECOND
-                : Math.min(MIN_INPUT_SPEED_PERCENT_PER_SECOND, Math.max(0.5, minSliderSpeedMmPerSecond / 2.0));
+                : Math.clamp(minSliderSpeedMmPerSecond / 2.0, 0.5, MIN_INPUT_SPEED_PERCENT_PER_SECOND);
         // 0 is a valid value here as well: every movement back counts as a reversal
         this.reversalMinDistance = (config.hdspReversalMinDistancePercent() != null && config.hdspReversalMinDistancePercent() >= 0
                 ? config.hdspReversalMinDistancePercent()
@@ -1135,7 +1129,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         }
         if (lead >= PULSE_LEAD)
         {
-            return moving ? stopInPlacePlan(now) : null;
+            return stopInPlacePlan(now);
         }
         double relativeSpeed = minSliderSpeed - inputSpeed;
         double durationS = relativeSpeed > 0
@@ -1528,7 +1522,7 @@ public class HdspSmoothedParameterProcessor extends AbstractStreamingParameterPr
         // for less is believed to arrive as early as the device gets there
         double distance = Math.abs(plan.target() - position);
         double believedDurationMs = minSliderSpeed > 0 && distance > 0
-                ? Math.min(durationMs, Math.max(1, distance / minSliderSpeed * 1000.0))
+                ? Math.clamp(distance / minSliderSpeed * 1000.0, 1, durationMs)
                 : durationMs;
         move = new SliderMove(plan.kind(), now, position, plan.towardsTop(), plan.target(), (long) believedDurationMs);
         lastCommandSentMs = now;

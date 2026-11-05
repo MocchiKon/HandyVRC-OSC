@@ -1,5 +1,7 @@
 package org.example.gui;
 
+import lombok.Getter;
+
 import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
@@ -14,6 +16,7 @@ public class ToggleSwitch extends JComponent
     private static final int WIDTH = 42;
     private static final int HEIGHT = 24;
 
+    @Getter
     private boolean selected;
     private boolean hover;
     /** Knob position, 0 (off) to 1 (on); animated towards {@link #selected}. */
@@ -80,11 +83,6 @@ public class ToggleSwitch extends JComponent
                 repaint();
             }
         });
-    }
-
-    public boolean isSelected()
-    {
-        return selected;
     }
 
     public void setSelected(boolean selected)

@@ -35,7 +35,6 @@ public class VrchatParameterScanner implements Closeable
     private static final String STATE_WAITING_FOR_PARAMETERS = "waiting-for-parameters";
     private static final String STATE_REPORTED = "reported";
 
-    private final ConfigProperties config;
     private final OscQueryTreeClient treeClient;
     private final BiConsumer<OscQueryServiceProfile, List<OscQueryNode>> reportConsumer;
     private final Map<String, OscQueryServiceProfile> discoveredServices = new ConcurrentHashMap<>();
@@ -46,10 +45,8 @@ public class VrchatParameterScanner implements Closeable
     private volatile int lastReportedFingerprint;
     private String lastLoggedState = "";
 
-    private VrchatParameterScanner(ConfigProperties config,
-                                   BiConsumer<OscQueryServiceProfile, List<OscQueryNode>> reportConsumer)
+    private VrchatParameterScanner(BiConsumer<OscQueryServiceProfile, List<OscQueryNode>> reportConsumer)
     {
-        this.config = config;
         this.reportConsumer = reportConsumer;
         this.treeClient = new OscQueryTreeClient(HTTP_TIMEOUT);
         this.scanThread = new Thread(this::scanLoop, "OSCQuery-ParameterScanner");
@@ -65,7 +62,7 @@ public class VrchatParameterScanner implements Closeable
     public static VrchatParameterScanner start(Consumer<Consumer<OscQueryServiceProfile>> discoverySource,
                                                ConfigProperties config)
     {
-        return start(discoverySource, config, (profile, parameters) ->
+        return start(discoverySource, (profile, parameters) ->
         {
             log.info("Received {} avatar parameter(s) from the OSCQuery service '{}' - validating config against them",
                     parameters.size(), profile.name());
@@ -76,10 +73,9 @@ public class VrchatParameterScanner implements Closeable
 
     /** Visible for tests: the report consumer decides what happens with the avatar parameters that were read. */
     static VrchatParameterScanner start(Consumer<Consumer<OscQueryServiceProfile>> discoverySource,
-                                        ConfigProperties config,
                                         BiConsumer<OscQueryServiceProfile, List<OscQueryNode>> reportConsumer)
     {
-        var scanner = new VrchatParameterScanner(config, reportConsumer);
+        var scanner = new VrchatParameterScanner(reportConsumer);
         discoverySource.accept(scanner::onServiceDiscovered);
         scanner.scanThread.start();
         return scanner;

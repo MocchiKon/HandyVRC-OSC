@@ -1,6 +1,7 @@
 package org.example.diagnostics;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.handy.common.DeviceMode;
 import org.example.handy.common.HandyClient;
@@ -33,6 +34,7 @@ import java.util.function.Consumer;
  * live movement stream.
  */
 @Slf4j
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class StepResponseCalibration
 {
     /** Delay between two state requests of the burst. Each request is a Bluetooth round trip. */
@@ -61,10 +63,6 @@ public final class StepResponseCalibration
     private static final double SETTLED_TOLERANCE = 0.03;
 
     private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
-
-    private StepResponseCalibration()
-    {
-    }
 
     /**
      * Runs the calibration and writes the CSV file.
@@ -722,7 +720,7 @@ public final class StepResponseCalibration
         }
     }
 
-    private static void moveTo(HandyClient client, float target, int durationMs) throws Exception
+    private static void moveTo(HandyClient client, float target, int durationMs)
     {
         var response = client.hdspXpt(target, durationMs, true);
         if (response.error() != null)

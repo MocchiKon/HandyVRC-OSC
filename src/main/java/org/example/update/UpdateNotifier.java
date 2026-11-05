@@ -1,5 +1,6 @@
 package org.example.update;
 
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.gui.UpdateDialog;
 
@@ -16,12 +17,9 @@ import java.util.Locale;
  * here is best effort.
  */
 @Slf4j
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class UpdateNotifier
 {
-    private UpdateNotifier()
-    {
-    }
-
     public static void showUpdateAvailable(UpdateCheckResult result)
     {
         String downloadUrl = result.downloadUrl();

@@ -22,11 +22,6 @@ public class HandyClientBle extends HandyClient
     private final RateLimitedLogger notificationWarnings = new RateLimitedLogger(log);
     /** One failed HDSP command produces one log line per try, which would flood the log while the device is broken. */
     private final RateLimitedLogger commandWarnings = new RateLimitedLogger(log);
-    /**
-     * False when the device failed the start-up check. The optional queries then fail immediately instead of waiting
-     * for their timeouts (the movement commands are fire-and-forget and are still sent).
-     */
-    private volatile boolean responsive = true;
     /** Time of the last XPT command, used to say how long after it a notification arrived. */
     private volatile long lastXptAtNanos;
     private volatile float lastXp = Float.NaN;
@@ -59,12 +54,10 @@ public class HandyClientBle extends HandyClient
         {
             HandyRpc.Response mode = rpc.sendRequest(HandyRpc.Request.newBuilder()
                     .setRequestModeGet(Messages.RequestModeGet.getDefaultInstance()), timeoutMs);
-            responsive = true;
             log.info("Handy answered: mode={}", mode.getResponseModeGet().getMode());
         }
         catch (TimeoutException e)
         {
-            responsive = false;
             throw new IllegalStateException("The Handy is connected but does not answer. Power-cycle it"
                     + " and check that its LED is blue (Bluetooth mode)"
                     + " then press Start again.", e);
@@ -77,7 +70,6 @@ public class HandyClientBle extends HandyClient
         }
         catch (Exception e)
         {
-            responsive = false;
             throw new IllegalStateException("Could not talk to the Handy over Bluetooth: %s".formatted(e.getMessage()), e);
         }
 
@@ -293,7 +285,7 @@ public class HandyClientBle extends HandyClient
                     "[BLE] Device reported an error: code=%d msg=%s".formatted(notification.getNotificationError().getCode(),
                             notification.getNotificationError().getMessage()));
             case NOTIFICATION_TEMP_HIGH -> notificationWarnings.warn("[BLE] Device is overheating and may stop moving");
-            case NOTIFICATION_SLIDER_BLOCKED -> notificationWarnings.warn("[BLE] Slider is blocked ({})".formatted(sinceXpt));
+            case NOTIFICATION_SLIDER_BLOCKED -> notificationWarnings.warn("[BLE] Slider is blocked (%s)".formatted(sinceXpt));
             case NOTIFICATION_IDLE_TIMEOUT -> log.warn("[BLE] Device is idle and will disconnect/sleep soon ({})", sinceXpt);
             // Seen at DEBUG, so that a log shows which notifications arrived without flooding it during a session.
             default -> log.debug("[BLE] Notification: {} ({})", notification.getNotificationCase(), sinceXpt);

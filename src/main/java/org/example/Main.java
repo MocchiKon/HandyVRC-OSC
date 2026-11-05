@@ -47,11 +47,6 @@ public class Main
         return Path.of(propertiesPath + "/" + "app.properties");
     }
 
-    public static void delayedClosingWithLog(String msg)
-    {
-        delayedClosingWithLog(msg, null);
-    }
-
     public static void delayedClosingWithLog(String msg, Exception exception)
     {
         try

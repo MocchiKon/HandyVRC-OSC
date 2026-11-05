@@ -77,7 +77,7 @@ public class ModernButton extends JButton
             case PRIMARY ->
             {
                 Color top = !enabled ? Theme.SURFACE_RAISED : pressed ? Theme.ACCENT_DARK : hover ? Theme.ACCENT_LIGHT : Theme.ACCENT;
-                Color bottom = !enabled ? Theme.SURFACE_RAISED : pressed ? Theme.ACCENT_DARK : Theme.ACCENT_DARK;
+                Color bottom = !enabled ? Theme.SURFACE_RAISED : Theme.ACCENT_DARK;
                 g.setPaint(new GradientPaint(0, 0, top, 0, getHeight(), bottom));
                 g.fill(shape);
             }

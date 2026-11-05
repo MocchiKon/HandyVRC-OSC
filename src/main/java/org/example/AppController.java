@@ -1,5 +1,6 @@
 package org.example;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.example.config.ConfigProperties;
 import org.example.config.ConnectionType;
@@ -8,7 +9,9 @@ import org.example.handy.ble.HandyBleAdapter;
 import org.example.handy.ble.HandyClientBle;
 import org.example.handy.common.HandyClient;
 import org.example.handy.intiface.ButtplugConnection;
+import org.example.handy.intiface.GenericLinearDevice;
 import org.example.handy.intiface.IntifaceDeviceConnector;
+import org.example.handy.wifi.HandyWifiConnector;
 import org.example.oscquery.OscQueryService;
 import org.example.oscquery.OscQueryServiceProfile;
 import org.example.oscquery.VrchatParameterScanner;
@@ -28,8 +31,8 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /**
- * Starts and stops the app on request of the GUI: connects the device (directly over Bluetooth or through Intiface
- * Central), opens the OSC port (announced
+ * Starts and stops the app on request of the GUI: connects the device (directly over Bluetooth, through the Handy
+ * servers over Wi-Fi, or through Intiface Central), opens the OSC port (announced
  * to VRChat over OSCQuery), and runs the processor that turns the avatar parameters into device commands.
  * <p>
  * In test mode the avatar parameters do not come from VRChat but from the GUI ({@link #feedTestInput}), so the
@@ -85,17 +88,20 @@ public class AppController implements AutoCloseable
     private final Consumer<Status> statusListener;
     private final IntConsumer positionListener;
 
+    @Getter
     private volatile Status status = new Status(State.STOPPED, "");
 
     // Only used on the worker thread (volatile for the shutdown hook)
     private volatile HandyClient client;
     /** How the connected device was connected, so that a change of the connection settings reconnects it. */
     private DeviceConnection connectedWith;
+    /** Warning shown with the running status, or null when there is nothing to warn about. */
+    private String warning;
     /**
-     * Why the connected device may not move (it connected but did not answer), shown with the running status instead
-     * of refusing to start; null when the device answered.
+     * True when the Bluetooth device connected but did not answer the start-up check. The next Start has to reconnect
+     * instead of reusing the connection
      */
-    private String deviceWarning;
+    private boolean bluetoothUnresponsive;
     private boolean shutdownHookRegistered;
     private OscEndpoint osc;
     private ParameterProcessor processor;
@@ -122,11 +128,6 @@ public class AppController implements AutoCloseable
         this.positionListener = positionListener;
         worker.scheduleWithFixedDelay(this::checkDeviceConnection, CONNECTION_CHECK_INTERVAL_MS,
                 CONNECTION_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
-    }
-
-    public Status getStatus()
-    {
-        return status;
     }
 
     /**
@@ -239,10 +240,10 @@ public class AppController implements AutoCloseable
                 setStatus(State.ERROR, "Start the device before running the step-response calibration.");
                 return;
             }
-            if (connectedWith != null && connectedWith.type() == ConnectionType.INTIFACE)
+            if (connectedWith != null && connectedWith.type() != ConnectionType.DIRECT)
             {
-                setStatus(State.ERROR, "The step-response calibration needs a Direct Bluetooth connection: Intiface"
-                        + " cannot report the device position. Change Connection to Direct on the Basic tab.");
+                setStatus(State.ERROR, "The step-response calibration needs a Bluetooth connection. Change Connection"
+                        + " to Bluetooth on the Basic tab.");
                 return;
             }
             calibrationRunning = true;
@@ -350,11 +351,14 @@ public class AppController implements AutoCloseable
             DeviceConnection connection = DeviceConnection.of(config);
             // A connection that just failed the start-up check is replaced as well: pressing Start is what the
             // user does after power-cycling the Handy, and it has to connect (and check) again to notice.
-            if (!isDeviceConnected() || !connection.equals(connectedWith) || deviceWarning != null)
+            if (!isDeviceConnected() || !connection.equals(connectedWith) || bluetoothUnresponsive)
             {
-                setStatus(State.CONNECTING, connection.type() == ConnectionType.INTIFACE
-                        ? "Connecting to Intiface Central at %s...".formatted(connection.intifaceUri())
-                        : "Searching for your Handy over Bluetooth...");
+                setStatus(State.CONNECTING, switch (connection.type())
+                {
+                    case DIRECT -> "Searching for your Handy over Bluetooth...";
+                    case WIFI -> "Connecting to your Handy through the Handy servers...";
+                    case INTIFACE -> "Connecting to Intiface Central at %s...".formatted(connection.intifaceUri());
+                });
                 connectDevice(connection);
             }
             setStatus(State.CONNECTING, "Preparing your device...");
@@ -372,7 +376,7 @@ public class AppController implements AutoCloseable
                 log.info("Test mode running ({} mode, moving the {})", config.processingAlgorithm().getLabel(),
                         config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice");
                 setStatus(State.RUNNING, "Test mode: move the %s in the Test mode window to move your Handy."
-                        .formatted(config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice"), deviceWarning);
+                        .formatted(config.spsType() == SpsType.PENETRATOR ? "penetrator" : "orifice"), warning);
                 return;
             }
 
@@ -382,7 +386,7 @@ public class AppController implements AutoCloseable
             startParameterScanner(config);
             processor.run();
             log.info("Running ({} mode, {})", config.processingAlgorithm().getLabel(), config.spsType());
-            setStatus(State.RUNNING, osc.describe(), deviceWarning);
+            setStatus(State.RUNNING, osc.describe(), warning);
         }
         catch (Exception e)
         {
@@ -435,9 +439,12 @@ public class AppController implements AutoCloseable
     {
         if (status.state() == State.RUNNING && !isDeviceConnected())
         {
-            log.error(connectedWith != null && connectedWith.type() == ConnectionType.INTIFACE
-                    ? "Lost the connection to Intiface Central or the device"
-                    : "Lost the Bluetooth connection to the Handy");
+            log.error(switch (connectedWith == null ? ConnectionType.DIRECT : connectedWith.type())
+            {
+                case WIFI -> "Lost the connection to the Handy servers or the device";
+                case INTIFACE -> "Lost the connection to Intiface Central or the device";
+                case DIRECT -> "Lost the Bluetooth connection to the Handy";
+            });
             stopSession(true);
             setStatus(State.ERROR, "Lost the connection to your device. Press Start to reconnect.");
         }
@@ -455,9 +462,16 @@ public class AppController implements AutoCloseable
         client = switch (connection.type())
         {
             case DIRECT -> connectBluetooth();
+            case WIFI -> HandyWifiConnector.connect(connection.connectionKey(), connection.handyApplicationId());
             case INTIFACE -> IntifaceDeviceConnector.connect(connection.intifaceUri(),
                     connection.intifaceDeviceIndex(), connection.intifaceDeviceName());
         };
+        // The actual device is only known now: "First available device" is resolved inside the connector, so this
+        // warning works for an explicit choice and for the automatic one.
+        if (client instanceof GenericLinearDevice generic && IntifaceDeviceConnector.isHandy(generic.device().name()))
+        {
+            warning = IntifaceDeviceConnector.HANDY_WARNING;
+        }
         connectedWith = connection;
         log.info("Device connected ({})", connection.type().getLabel());
         registerShutdownHook();
@@ -513,12 +527,13 @@ public class AppController implements AutoCloseable
         try
         {
             client.verifyResponsive();
-            deviceWarning = null;
+            bluetoothUnresponsive = false;
         }
         catch (RuntimeException e)
         {
             log.error("The Handy did not answer the start-up check, continuing anyway: {}", e.getMessage());
-            deviceWarning = "The Handy is connected but does not return responses, so it may not move and slider settings may not apply."
+            bluetoothUnresponsive = true;
+            warning = "The Handy is connected but does not return responses, so it may not move and slider settings may not apply."
                     + " Power-cycle it and press Start again.";
         }
         return client;
@@ -529,7 +544,8 @@ public class AppController implements AutoCloseable
         HandyClient oldClient = client;
         client = null;
         connectedWith = null;
-        deviceWarning = null;
+        warning = null;
+        bluetoothUnresponsive = false;
         try
         {
             if (oldClient != null)
@@ -655,21 +671,26 @@ public class AppController implements AutoCloseable
     /**
      * The settings a device connection is made with.
      *
-     * @param intifaceUri         address of Intiface Central, null for a direct connection
+     * @param intifaceUri         address of Intiface Central, null for a direct or Wi-Fi connection
      * @param intifaceDeviceIndex Intiface index of the selected device, -1 to use the first movable device
-     * @param intifaceDeviceName  selected device display label, blank to use the first device that can be moved
+     * @param intifaceDeviceName  display label of the selected device, used to find it again when its index changes
+     * @param connectionKey       connection key of the Handy, blank unless the Wi-Fi connection is used
+     * @param handyApplicationId  application ID used with the Handy servers, blank unless the Wi-Fi connection is used
      */
     private record DeviceConnection(ConnectionType type, URI intifaceUri, int intifaceDeviceIndex,
-                                    String intifaceDeviceName)
+                                    String intifaceDeviceName, String connectionKey, String handyApplicationId)
     {
         static DeviceConnection of(ConfigProperties config)
         {
             ConnectionType type = config.connection() != null ? config.connection() : ConnectionType.DIRECT;
             boolean intiface = type == ConnectionType.INTIFACE;
+            boolean wifi = type == ConnectionType.WIFI;
             return new DeviceConnection(type,
                     intiface ? ConfigProperties.intifaceUri(config.intifaceAddress()) : null,
                     intiface && config.intifaceDeviceIndex() != null ? config.intifaceDeviceIndex() : -1,
-                    intiface && config.intifaceDeviceName() != null ? config.intifaceDeviceName().trim() : "");
+                    intiface && config.intifaceDeviceName() != null ? config.intifaceDeviceName().trim() : "",
+                    wifi && config.connectionKey() != null ? config.connectionKey().trim() : "",
+                    wifi ? config.effectiveHandyApplicationId() : "");
         }
     }
 

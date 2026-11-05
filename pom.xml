@@ -239,13 +239,22 @@
 
     <profiles>
         <!--
-            Release packaging, run with: mvn package -PpackageForRelease
-            Creates in target/, each with a HandyVRC-OSC folder and the default app.properties inside:
-              HandyVRC-OSC-<version>-windows.zip        HandyVRC-OSC.exe with the bundled Windows JRE
-              HandyVRC-OSC-<version>-all-platforms.zip  HandyVRC-OSC.jar with start.bat/start.sh, needs Java 21+ installed
+            Release packaging:
+            mvn package -PpackageForRelease
+
+            Creates:
+              HandyVRC-OSC-<version>-windows.zip
+              HandyVRC-OSC-<version>-all-platforms.zip
+
+            packageProperties:
+              false (default) = do not generate app.properties
+              true            = generate app.properties
         -->
         <profile>
             <id>packageForRelease</id>
+            <properties>
+                <skipPackageProperties>true</skipPackageProperties>
+            </properties>
             <build>
                 <plugins>
                     <!-- Writes target/release/app.properties from ConfigProperties.defaults() -->
@@ -262,6 +271,8 @@
                                 </goals>
                                 <configuration>
                                     <mainClass>org.example.config.DefaultConfigWriter</mainClass>
+                                    <!-- Skip unless packageProperties=true -->
+                                    <skip>${skipPackageProperties}</skip>
                                     <arguments>
                                         <argument>${project.build.directory}/release/app.properties</argument>
                                     </arguments>
@@ -270,7 +281,7 @@
                         </executions>
                     </plugin>
 
-                    <!-- Downloads the Windows JRE (checksum verified, cached in the local repository) -->
+                    <!-- Downloads the Windows JRE (checksum verified) -->
                     <plugin>
                         <groupId>com.googlecode.maven-download-plugin</groupId>
                         <artifactId>download-maven-plugin</artifactId>

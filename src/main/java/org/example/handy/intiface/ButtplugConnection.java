@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.example.handy.common.RateLimitedLogger;
 
@@ -120,6 +121,7 @@ public class ButtplugConnection implements AutoCloseable
     /** Movement commands are sent continuously, a failing one would otherwise flood the log. */
     private final RateLimitedLogger commandErrors = new RateLimitedLogger(log);
     private Transport transport;
+    @Getter
     private volatile boolean open = true;
     private ScheduledExecutorService pinger;
     /** Address the connection was opened with, null for a connection created by a test. */
@@ -219,11 +221,6 @@ public class ButtplugConnection implements AutoCloseable
     void setTransport(Transport transport)
     {
         this.transport = transport;
-    }
-
-    public boolean isOpen()
-    {
-        return open;
     }
 
     /** @return the address this connection was opened with, null when it was created by a test */

@@ -96,6 +96,8 @@ public class ConfigLoader
 
         return ConfigProperties.builder()
                 .connection(connection)
+                .connectionKey(getProperty(properties, "connectionKey").orElse(defaults.connectionKey()))
+                .handyApplicationId(getProperty(properties, "handyApplicationId").orElse(defaults.handyApplicationId()))
                 .intifaceAddress(getProperty(properties, "intifaceAddress").orElse(defaults.intifaceAddress()))
                 .intifaceDeviceIndex(getInt(properties, "intifaceDeviceIndex", defaults.intifaceDeviceIndex(), -1,
                         Integer.MAX_VALUE))
@@ -188,15 +190,23 @@ public class ConfigLoader
                 """);
         section(out, "Basic");
         entry(out, "connection", config.connection(),
-                "DIRECT (default, recommended: the app connects to the Handy over Bluetooth) or INTIFACE (through Intiface Central).");
+                "DIRECT (shown as 'Bluetooth', default and recommended: the app connects to the Handy over"
+                        + " Bluetooth), WIFI (shown as 'Wi-Fi': through the Handy servers, needs connectionKey) or"
+                        + " INTIFACE (through Intiface Central).");
+        entry(out, "connectionKey", config.connectionKey(),
+                "Connection key of the Handy, shown in the Handy app when the Handy is connected to Wi-Fi."
+                        + " Only used when connection=WIFI.");
+        entry(out, "handyApplicationId", config.handyApplicationId(),
+                "Application ID (API key) used with the Handy servers. Only used when connection=WIFI. The default"
+                        + " is the one issued for this app, you can bring your own if this one gets throttled.");
         entry(out, "intifaceAddress", config.intifaceAddress(),
                 "WebSocket address of the Intiface Central server. Only used when connection=INTIFACE.");
         entry(out, "intifaceDeviceIndex", config.intifaceDeviceIndex(),
                 "Intiface index of the selected device (unique even when two devices have the same name). -1 uses the"
                         + " first device that can be moved to a position. Only used when connection=INTIFACE.");
         entry(out, "intifaceDeviceName", config.intifaceDeviceName(),
-                "Display label of the selected device, shown while it is not connected to Intiface Central. Blank uses"
-                        + " the first device that can be moved to a position. Only used when connection=INTIFACE.");
+                "Display label of the selected device, kept so that the list can still show it while it is not"
+                        + " connected to Intiface Central. Only used when connection=INTIFACE.");
         entry(out, "spsType", config.spsType(),
                 "PENETRATOR or ORIFICE: which SPS component of your avatar moves the device.");
         entry(out, "interactWith", config.interactWith(),
@@ -237,7 +247,7 @@ public class ConfigLoader
         entry(out, "hdspLogDevicePosition", config.hdspLogDevicePosition(), "(Smoothed only) Logs the device position (diagnostics).");
         entry(out, "hdspDevicePositionLogIntervalMs", config.hdspDevicePositionLogIntervalMs(),
                 "(Smoothed only) How often (ms) the device position is read while logging. The actual period is this"
-                        + " plus the ~100 ms round trip; use 50 for a short diagnostic run, not permanently.");
+                        + " plus the device round trip; use 50 for a short diagnostic run, not permanently.");
         section(out, "Diagnostics");
         entry(out, "hdspDiagnosticTrace", config.hdspDiagnosticTrace(),
                 "(Smoothed only) Writes a structured JSONL trace of values, commands, device samples and BLE"

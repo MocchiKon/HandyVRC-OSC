@@ -102,7 +102,7 @@ class VrchatParameterScannerTest
     {
         var profile = new OscQueryServiceProfile("VRChat-Client-Test", List.of(InetAddress.getLoopbackAddress()), port);
         // The service is "discovered" before the scanner takes its first look, just like a running VRChat
-        scanner = VrchatParameterScanner.start(listener -> listener.accept(profile), config(),
+        scanner = VrchatParameterScanner.start(listener -> listener.accept(profile),
                 (reportedProfile, parameters) ->
                 {
                     assertThat(reportedProfile).isEqualTo(profile);

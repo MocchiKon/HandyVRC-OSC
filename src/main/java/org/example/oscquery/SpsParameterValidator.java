@@ -1,5 +1,6 @@
 package org.example.oscquery;
 
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.processor.SpsType;
 
@@ -11,14 +12,11 @@ import java.util.List;
  * parameters against them. Purely informational: receiving and processing of OSC messages never depends on it.
  */
 @Slf4j
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class SpsParameterValidator
 {
     /** Upper limit for the extra list of SPS-like parameters, just to keep the log readable. */
     private static final int MAX_OTHER_PARAMETERS_LOGGED = 50;
-
-    private SpsParameterValidator()
-    {
-    }
 
     /**
      * Logs all penetrator/orifice candidates found in the OSC namespace of VRChat and validates the configured

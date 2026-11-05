@@ -40,11 +40,6 @@ public class GenericLinearDevice extends HandyClient
         return connection;
     }
 
-    public String getDeviceName()
-    {
-        return device.name();
-    }
-
     @Override
     public String getDeviceIdentifier()
     {

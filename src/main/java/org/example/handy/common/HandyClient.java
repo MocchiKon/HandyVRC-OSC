@@ -11,8 +11,8 @@ public abstract class HandyClient implements AutoCloseable
     public abstract boolean checkConnectionStatus();
 
     /**
-     * @return a stable identifier of the connected device (a Bluetooth address or a device name), used to pick the
-     * calibration profile that belongs to it; empty when the connection cannot provide one
+     * @return a stable identifier of the connected device (a Bluetooth address, a Wi-Fi connection key, or a device
+     * name), used to pick the calibration profile that belongs to it; empty when the connection cannot provide one
      */
     public String getDeviceIdentifier()
     {
@@ -24,7 +24,7 @@ public abstract class HandyClient implements AutoCloseable
 
     /**
      * @return true when the connection can apply and read the stroke range on the device itself. Intiface cannot
-     * (Buttplug has no stroke zone), so the stroke range setting is not used there.
+     * (Buttplug has no stroke zone), so the stroke range setting is not used there. Bluetooth and Wi-Fi can.
      */
     public boolean supportsSliderSettings()
     {
@@ -32,7 +32,7 @@ public abstract class HandyClient implements AutoCloseable
     }
 
     /**
-     * @return true when the connected device can report its position. Only the direct Bluetooth connection can;
+     * @return true when the connected device can report its position. The Bluetooth and Wi-Fi connections can;
      * the device position log is not available through Intiface.
      */
     public boolean supportsSliderState()
@@ -45,10 +45,11 @@ public abstract class HandyClient implements AutoCloseable
      * (in ms) for the move.
      * <p>
      * The position is the normalized HDSP position in the 0.0-1.0 range of the configured stroke zone, which is
-     * the unit the device protocol uses. The HDSP processor converts the percentage positions used in the rest
-     * of the app before calling this, so an implementation only has to translate the command into its own wire
-     * format (the BLE protocol takes the position as it is, Intiface sends it as a Buttplug
-     * {@code HwPositionWithDuration} command).
+     * the unit used inside the app. The HDSP processor converts the percentage positions used in the rest of the
+     * app before calling this, so an implementation only has to translate the command into its own wire format (the
+     * BLE protocol and the Wi-Fi API take the normalized position as it is, Intiface sends it as a Buttplug
+     * {@code HwPositionWithDuration} command). The Wi-Fi API documentation describes {@code xp} as a percentage, but
+     * the service actually accepts 0.0-1.0 (0 = bottom, 1 = top), like the Bluetooth client.
      * <p>
      * The default implementation rejects it.
      *
@@ -70,8 +71,8 @@ public abstract class HandyClient implements AutoCloseable
     }
 
     /**
-     * Reads the position and speed the slider has right now. Only the direct Bluetooth connection can read it; the
-     * default implementation reports nothing.
+     * Reads the position and speed the slider has right now. Bluetooth and Wi-Fi can read it; the default
+     * implementation reports nothing.
      */
     public Optional<SliderState> getSliderState()
     {

@@ -1,5 +1,7 @@
 package org.example.gui;
 
+import lombok.NoArgsConstructor;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.font.TextAttribute;
@@ -7,13 +9,10 @@ import java.util.Map;
 import java.util.function.IntFunction;
 
 /** Builds the cards and the rows (name, explanation tooltip and control) of the settings pages. */
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 final class SettingRows
 {
     private static final int ROW_GAP = 16;
-
-    private SettingRows()
-    {
-    }
 
     /** Card with a small uppercase title; rows are added with {@link #addRow}. */
     static RoundedPanel section(String title)

@@ -17,6 +17,7 @@ class ConfigPropertiesTest
         assertThat(defaults.fullyPenetratedAtValue()).isEqualTo(85f);
         assertThat(defaults.customAvatarParameter()).isFalse();
         assertThat(defaults.avatarParameter()).isEqualTo(ConfigProperties.defaultAvatarParameter(defaults.spsType(), defaults.interactWith()));
+        assertThat(defaults.handyApplicationId()).isEqualTo("oscT9zwCSnAKDYMthQ4yY_5m8jMUYY-W");
         assertThat(defaults.validate()).isNull();
     }
 
@@ -72,5 +73,32 @@ class ConfigPropertiesTest
         assertThat(config.toLoggableString())
                 .contains("avatarParameter=/avatar/parameters/OGB/Pen/*/PenOthers")
                 .contains("spsType=PENETRATOR");
+    }
+
+    @Test
+    void toLoggableStringMasksTheWifiSecrets()
+    {
+        var config = ConfigProperties.defaults().toBuilder()
+                .connection(ConnectionType.WIFI)
+                .connectionKey("AbC12345")
+                .handyApplicationId("my-secret-app-id")
+                .build();
+
+        assertThat(config.toLoggableString())
+                .doesNotContain("AbC12345")
+                .doesNotContain("my-secret-app-id")
+                .doesNotContain("Ab***45")
+                .doesNotContain("my***id")
+                .contains("connectionKey=Ab***")
+                .contains("handyApplicationId=my***");
+    }
+
+    @Test
+    void maskingKeepsOnlyTheFirstTwoCharactersAndThreeAsterisks()
+    {
+        assertThat(ConfigProperties.maskSecret("ABCDEF1")).isEqualTo("AB***");
+        assertThat(ConfigProperties.maskSecret("N")).isEqualTo("N***");
+        assertThat(ConfigProperties.maskSecret("")).isEqualTo("***");
+        assertThat(ConfigProperties.maskSecret(null)).isEqualTo("***");
     }
 }

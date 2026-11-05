@@ -57,7 +57,7 @@ public class MdnsAdvertisement implements Closeable
         return advertisement;
     }
 
-    private MdnsAdvertisement(MdnsMessage.Service service) throws IOException
+    private MdnsAdvertisement(MdnsMessage.Service service)
     {
         this.service = service;
         this.socket = openSocket(service.address());

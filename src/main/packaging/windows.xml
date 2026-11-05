@@ -13,9 +13,6 @@
             <source>${project.build.directory}/${project.artifactId}.exe</source>
         </file>
         <file>
-            <source>${project.build.directory}/release/app.properties</source>
-        </file>
-        <file>
             <source>LICENSE</source>
         </file>
     </files>
@@ -23,6 +20,13 @@
         <fileSet>
             <directory>${project.build.directory}/windows-jre/${windowsJre.release}-jre</directory>
             <outputDirectory>jre</outputDirectory>
+        </fileSet>
+        <fileSet>
+            <directory>${project.build.directory}/release</directory>
+            <outputDirectory>.</outputDirectory>
+            <includes>
+                <include>app.properties</include>
+            </includes>
         </fileSet>
     </fileSets>
 </assembly>

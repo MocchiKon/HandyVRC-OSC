@@ -112,7 +112,7 @@ public class StatusPill extends JComponent
         g.setFont(getFont());
         FontMetrics metrics = g.getFontMetrics();
         g.setColor(state == AppController.State.ERROR ? Theme.ERROR : Theme.TEXT);
-        g.drawString(label(), dotX + dot + 9, (height - metrics.getHeight()) / 2 + metrics.getAscent());
+        g.drawString(label(), dotX + dot + 9, (float) (height - metrics.getHeight()) / 2 + metrics.getAscent());
         g.dispose();
     }
 }

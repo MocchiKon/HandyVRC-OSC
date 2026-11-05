@@ -96,12 +96,6 @@ class TestModeWindow
         scene.requestFocusInWindow();
     }
 
-    /** The window content (package-private so that it can be rendered without a window). */
-    JComponent content()
-    {
-        return content;
-    }
-
     private JComponent buildContent()
     {
         var root = new JPanel(new BorderLayout(0, 14));

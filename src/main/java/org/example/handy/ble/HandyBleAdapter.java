@@ -59,7 +59,7 @@ public class HandyBleAdapter implements RpcTransport
         {
             throw new IllegalStateException("No Bluetooth adapter found");
         }
-        Adapter adapter = adapters.get(0);
+        Adapter adapter = adapters.getFirst();
 
         Peripheral found;
         try

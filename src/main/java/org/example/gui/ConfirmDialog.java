@@ -1,5 +1,7 @@
 package org.example.gui;
 
+import lombok.NoArgsConstructor;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyEvent;
@@ -9,13 +11,10 @@ import java.util.Arrays;
  * Small confirmation dialog styled like the rest of the app. The stock {@link JOptionPane} cannot be themed: its
  * Metal buttons ignore the dark colors, and a long message is cut off instead of wrapped.
  */
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 final class ConfirmDialog
 {
     private static final int MESSAGE_WIDTH = 520;
-
-    private ConfirmDialog()
-    {
-    }
 
     /**
      * Shows the dialog and waits until it is closed; has to be called on the event dispatch thread.

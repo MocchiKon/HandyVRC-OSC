@@ -2,6 +2,7 @@ package org.example.handy.ble;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.handy.proto.HandyRpc;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.HexFormat;
@@ -44,6 +45,7 @@ public class HandyRpcClient implements AutoCloseable
     private final Map<Integer, PendingRequest> pendingRequests = new ConcurrentHashMap<>();
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final Thread readerThread;
+    @Setter
     private volatile NotificationListener notificationListener;
 
     /** A request whose response is still awaited by some caller. */
@@ -67,11 +69,6 @@ public class HandyRpcClient implements AutoCloseable
         this.readerThread = new Thread(this::readLoop, "handy-ble-rpc-reader");
         this.readerThread.setDaemon(true);
         this.readerThread.start();
-    }
-
-    public void setNotificationListener(NotificationListener notificationListener)
-    {
-        this.notificationListener = notificationListener;
     }
 
     /**

@@ -1,5 +1,7 @@
 package org.example.gui;
 
+import lombok.Setter;
+
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
@@ -22,6 +24,7 @@ public class SegmentedControl<T> extends JComponent
     private final boolean compact;
     private int selectedIndex;
     private int hoverIndex = -1;
+    @Setter
     private Consumer<T> selectionListener = value -> {};
 
     public SegmentedControl(List<Option<T>> options, T selected, boolean compact)
@@ -34,11 +37,6 @@ public class SegmentedControl<T> extends JComponent
         setFont(Theme.bold(compact ? 12.5f : 13f));
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         installListeners();
-    }
-
-    public void setSelectionListener(Consumer<T> selectionListener)
-    {
-        this.selectionListener = selectionListener;
     }
 
     public T getSelected()

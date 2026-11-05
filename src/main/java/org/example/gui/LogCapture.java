@@ -6,6 +6,7 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.PatternLayout;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import lombok.NoArgsConstructor;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * level every received OSC value is logged), so a message is only formatted and queued here; the Logs tab takes
  * the queued messages a few times per second. When the queue is full, messages are dropped and counted.
  */
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class LogCapture extends AppenderBase<ILoggingEvent>
 {
     private static final int CAPACITY = 5_000;
@@ -30,10 +32,6 @@ public final class LogCapture extends AppenderBase<ILoggingEvent>
     private final BlockingQueue<Entry> pending = new ArrayBlockingQueue<>(CAPACITY);
     private final AtomicLong dropped = new AtomicLong();
     private PatternLayout layout;
-
-    private LogCapture()
-    {
-    }
 
     /** Starts capturing; call as early as possible, so that the startup messages are shown as well. */
     public static synchronized void install()

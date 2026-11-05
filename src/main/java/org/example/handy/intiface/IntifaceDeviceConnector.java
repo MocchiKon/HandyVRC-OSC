@@ -1,5 +1,6 @@
 package org.example.handy.intiface;
 
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.handy.common.HandyClient;
 
@@ -16,36 +17,26 @@ import java.util.stream.Collectors;
  * Buttplug {@code HwPositionWithDuration} output type (see {@link GenericLinearDevice}).
  */
 @Slf4j
+@NoArgsConstructor(access = lombok.AccessLevel.PRIVATE)
 public final class IntifaceDeviceConnector
 {
     public static final String CLIENT_NAME = "HandyVRC-OSC";
+    /** Shown in the settings and with the running status when a Handy is driven through Intiface Central. */
+    public static final String HANDY_WARNING = "Bluetooth connection is strongly recommended for The Handy. When using"
+            + " Intiface the stroke range setting is ignored (the device keeps its full stroke), stop-on-target does"
+            + " not work, and slider movement will not be as good.";
     static final long DEVICE_SEARCH_TIMEOUT_MS = 15_000;
     /** How long listing the devices scans for a device when none is connected yet. */
     public static final long DISCOVERY_SCAN_TIMEOUT_MS = 5_000;
     private static final long SCAN_POLL_MS = 100;
 
-    private IntifaceDeviceConnector()
-    {
-    }
-
-    /**
-     * Connects to Intiface Central and returns the client for the selected device.
-     *
-     * @param uri                 address of the Intiface Central server
-     * @param preferredDeviceName device the user selected, blank to use the first device that can be moved
-     */
-    public static HandyClient connect(URI uri, String preferredDeviceName) throws IOException
-    {
-        return connect(uri, -1, preferredDeviceName);
-    }
-
     /**
      * Connects to Intiface Central and returns the client for the selected device.
      *
      * @param uri                  address of the Intiface Central server
-     * @param preferredDeviceIndex Intiface device index of the selected device, negative to pick by name
-     * @param preferredDeviceName  device the user selected (its display label or device name), blank to use the
-     *                             first device that can be moved
+     * @param preferredDeviceIndex Intiface device index of the selected device, negative to use the first device
+     *                             that can be moved
+     * @param preferredDeviceName  display label of the selected device, used to find it again when its index changed
      */
     public static HandyClient connect(URI uri, int preferredDeviceIndex, String preferredDeviceName) throws IOException
     {
@@ -56,9 +47,7 @@ public final class IntifaceDeviceConnector
             log.info("Using {} through Intiface Central", device.displayLabel());
             if (isHandy(device.name()))
             {
-                log.warn("A Handy is connected through Intiface. Direct connection mode is strongly recommended: the"
-                        + " stroke range setting is ignored, stop-on-target does not work, and the movement will not"
-                        + " be as good.");
+                log.warn(HANDY_WARNING);
             }
             return new GenericLinearDevice(connection, device);
         }
@@ -70,17 +59,8 @@ public final class IntifaceDeviceConnector
     }
 
     /**
-     * Finds the device to use: the selected one (by its unique Intiface index, or by name for settings written by an
-     * older version), otherwise the first one that can be moved to a position. Scans when it is not connected yet.
-     */
-    static ButtplugConnection.Device findDevice(ButtplugConnection connection, String preferredDeviceName) throws IOException
-    {
-        return findDevice(connection, -1, preferredDeviceName);
-    }
-
-    /**
-     * Finds the device to use: the selected one (by its unique Intiface index, or by name for settings written by an
-     * older version), otherwise the first one that can be moved to a position. Scans when it is not connected yet.
+     * Finds the device to use: the selected one by its index, or by its saved display label when Intiface gave it a
+     * new index, otherwise the first one that can be moved to a position. Scans when it is not connected yet.
      */
     static ButtplugConnection.Device findDevice(ButtplugConnection connection, int preferredDeviceIndex,
                                                 String preferredDeviceName) throws IOException
@@ -96,7 +76,7 @@ public final class IntifaceDeviceConnector
         {
             throw new IllegalStateException(notFoundMessage(connection, preferredDeviceIndex, preferred));
         }
-        if (hasSelection(preferredDeviceIndex, preferred))
+        if (preferredDeviceIndex >= 0)
         {
             log.info("The selected device '{}' is not connected yet, scanning...",
                     describeSelection(preferredDeviceIndex, preferred));
@@ -129,10 +109,9 @@ public final class IntifaceDeviceConnector
     }
 
     /**
-     * @return the selected device. The display label is the primary match: the Intiface index can change when a
-     * device reconnects, while the label usually stays. The index is still needed because two devices can carry the
-     * same name (two simulated strokers, for example): if both the label and the index fit, or the label is not
-     * unique, the index tells them apart.
+     * @return the selected device. The index is checked first because names are not unique. The saved display label
+     * is only used when there is a selected index, so that it can still find the device after Intiface gave it a new
+     * index; a name without an index means "first available device".
      */
     private static Optional<ButtplugConnection.Device> matchingDevice(ButtplugConnection connection,
                                                                       int preferredDeviceIndex, String preferred)
@@ -140,34 +119,30 @@ public final class IntifaceDeviceConnector
         List<ButtplugConnection.Device> movable = connection.devices().stream()
                 .filter(ButtplugConnection.Device::hasPositionControl)
                 .toList();
+        if (preferredDeviceIndex < 0)
+        {
+            return movable.stream().findFirst();
+        }
         if (!preferred.isEmpty())
         {
-            // The dropdown stores the display label; settings written by an older version stored the device name.
-            if (preferredDeviceIndex >= 0)
+            Optional<ButtplugConnection.Device> byIndexAndName = movable.stream()
+                    .filter(device -> device.index() == preferredDeviceIndex && matchesName(device, preferred))
+                    .findFirst();
+            if (byIndexAndName.isPresent())
             {
-                Optional<ButtplugConnection.Device> byLabelAndIndex = movable.stream()
-                        .filter(device -> device.index() == preferredDeviceIndex && matchesName(device, preferred))
-                        .findFirst();
-                if (byLabelAndIndex.isPresent())
-                {
-                    return byLabelAndIndex;
-                }
+                return byIndexAndName;
             }
-            Optional<ButtplugConnection.Device> byLabel = movable.stream()
+            Optional<ButtplugConnection.Device> byName = movable.stream()
                     .filter(device -> matchesName(device, preferred))
                     .findFirst();
-            if (byLabel.isPresent())
+            if (byName.isPresent())
             {
-                return byLabel;
+                return byName;
             }
         }
-        if (preferredDeviceIndex >= 0)
-        {
-            return movable.stream()
-                    .filter(device -> device.index() == preferredDeviceIndex)
-                    .findFirst();
-        }
-        return movable.stream().findFirst();
+        return movable.stream()
+                .filter(device -> device.index() == preferredDeviceIndex)
+                .findFirst();
     }
 
     private static boolean matchesName(ButtplugConnection.Device device, String name)
@@ -183,7 +158,7 @@ public final class IntifaceDeviceConnector
             return "The device '%s' cannot be moved to a position through Intiface Central. Choose a stroker"
                     .formatted(selection);
         }
-        if (hasSelection(preferredDeviceIndex, preferred))
+        if (hasSelection(preferredDeviceIndex))
         {
             return ("The device '%s' selected in the app is not connected to Intiface Central. Connect it there,"
                     + " press Refresh in the Device section, and press Start again. Devices Intiface Central reports: %s")
@@ -196,16 +171,19 @@ public final class IntifaceDeviceConnector
     private static boolean knownWithoutPositionControl(ButtplugConnection connection, int preferredDeviceIndex,
                                                        String preferred)
     {
+        if (preferredDeviceIndex < 0)
+        {
+            return false;
+        }
         return connection.devices().stream()
                 .filter(device -> !device.hasPositionControl())
-                .anyMatch(device -> (preferredDeviceIndex >= 0 && device.index() == preferredDeviceIndex)
-                        || (!preferred.isEmpty() && (device.displayLabel().equalsIgnoreCase(preferred)
-                        || device.name().equalsIgnoreCase(preferred))));
+                .anyMatch(device -> device.index() == preferredDeviceIndex
+                        || (!preferred.isEmpty() && matchesName(device, preferred)));
     }
 
-    private static boolean hasSelection(int preferredDeviceIndex, String preferred)
+    private static boolean hasSelection(int preferredDeviceIndex)
     {
-        return preferredDeviceIndex >= 0 || !preferred.isEmpty();
+        return preferredDeviceIndex >= 0;
     }
 
     private static String describeSelection(int preferredDeviceIndex, String preferred)

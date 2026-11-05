@@ -56,11 +56,11 @@ class IntifaceDeviceConnectorTest
     }
 
     @Test
-    void findsTheSelectedDeviceByItsName() throws IOException
+    void findsTheSelectedDeviceByItsIndex() throws IOException
     {
         answerWithDevices("\"3\":" + HANDY, "\"1\":" + SOLACE);
 
-        var device = IntifaceDeviceConnector.findDevice(connection, "Lovense Solace");
+        var device = IntifaceDeviceConnector.findDevice(connection, 1, "Lovense Solace");
 
         assertThat(device.name()).isEqualTo("Lovense Solace");
         assertThat(device.index()).isEqualTo(1);
@@ -71,7 +71,7 @@ class IntifaceDeviceConnectorTest
     {
         answerWithDevices("\"3\":" + HANDY, "\"1\":" + SOLACE);
 
-        var device = IntifaceDeviceConnector.findDevice(connection, "");
+        var device = IntifaceDeviceConnector.findDevice(connection, -1, "");
 
         assertThat(device.name()).isEqualTo("Lovense Solace");
     }
@@ -111,7 +111,7 @@ class IntifaceDeviceConnectorTest
     {
         answerWithDevices("\"2\":" + VIBRATOR, "\"1\":" + SOLACE);
 
-        var device = IntifaceDeviceConnector.findDevice(connection, null);
+        var device = IntifaceDeviceConnector.findDevice(connection, -1, null);
 
         assertThat(device.name()).isEqualTo("Lovense Solace");
     }
@@ -133,18 +133,8 @@ class IntifaceDeviceConnectorTest
     {
         answerWithDevices("\"2\":" + SIMULATED_2, "\"3\":" + SIMULATED_1);
 
-        // The device reconnected and got another index: the display label still finds it.
+        // The device reconnected and got another index: the saved display label still finds it.
         var device = IntifaceDeviceConnector.findDevice(connection, 7, "MyTest1 (Simulated Stroker)");
-
-        assertThat(device.index()).isEqualTo(3);
-    }
-
-    @Test
-    void findsTheSelectedDeviceByItsDisplayLabelWhenTheIndexIsUnknown() throws IOException
-    {
-        answerWithDevices("\"2\":" + SIMULATED_2, "\"3\":" + SIMULATED_1);
-
-        var device = IntifaceDeviceConnector.findDevice(connection, "MyTest1 (Simulated Stroker)");
 
         assertThat(device.index()).isEqualTo(3);
     }
@@ -154,9 +144,10 @@ class IntifaceDeviceConnectorTest
     {
         answerWithDevices("\"2\":" + VIBRATOR);
 
-        assertThatThrownBy(() -> IntifaceDeviceConnector.findDevice(connection, "Some vibrator"))
+        assertThatThrownBy(() -> IntifaceDeviceConnector.findDevice(connection, 2, "Some vibrator"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("cannot be moved to a position");
+                .hasMessageContaining("cannot be moved to a position")
+                .hasMessageContaining("Some vibrator");
         // Only the device list was requested; a scan would take the full search timeout
         assertThat(server.sent).noneMatch(message -> message.has("StartScanning"));
     }
